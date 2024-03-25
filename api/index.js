@@ -31,7 +31,7 @@ database.once("connected", () => {
 const apiServer = express();
 apiServer.use(express.json())
 apiServer.use(cors())
-apiServer.use("/", router)
+apiServer.use("/api", router)
 
 apiServer.listen("3001", () => {
     console.log("Listening to 3001")
