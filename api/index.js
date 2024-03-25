@@ -4,7 +4,7 @@
 require('dotenv').config();
 const mongoose = require("mongoose")
 const express = require("express")
-const router = require("./routes/routes")
+const router = require("../routes/routes")
 const cors = require("cors")
 const mongoPath = process.env.MONGOPATH
 
@@ -31,7 +31,7 @@ database.once("connected", () => {
 const apiServer = express();
 apiServer.use(express.json())
 apiServer.use(cors())
-apiServer.use("/api", router)
+apiServer.use("/", router)
 
 apiServer.listen("3001", () => {
     console.log("Listening to 3001")
