@@ -20,6 +20,9 @@ const userSchema = new mongoose.Schema({
         type: String,
         required: true,
         default: "#ff0000"
+    },
+    channels: {
+        type: [Object]
     }
 })
 
