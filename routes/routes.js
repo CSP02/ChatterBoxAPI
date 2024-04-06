@@ -2,6 +2,7 @@
  * ? Imports
  */
 const { Types } = require("./types.js")
+const mongoose = require("mongoose")
 const express = require("express");
 const bcrypt = require("bcrypt");
 const User = require("../Models/UserModel.js");
@@ -48,7 +49,7 @@ router.post("/signup", async (req, res) => {
                 return res.send({ success: false, message: "Username already exists" });
 
             const userData = await user.save();
-            res.send({ success: true, user: userData });
+            return res.send({ success: true, user: userData });
         } catch (error) {
             console.log(error);
         }
@@ -89,7 +90,7 @@ router.post("/login", async (req, res) => {
                 return res.send({ CorrectCredentials: false, user: null });
             });
         } else {
-            res.send({ content: "UserNotFound" });
+            return res.send({ content: "UserNotFound" });
         }
     } catch (error) {
         console.log(error);
@@ -115,6 +116,18 @@ router.post("/send_message", async (req, res) => {
             color: color,
             avatarURL: avatarURL,
         };
+
+
+        const channelInDb = await Channel.findOne({ _id: channelId })
+        if (channelInDb.members.filter(ob => ob.username === user.username).length <= 0) return res.send({ message: "You dont have access to the channel!" })
+
+        const channel = {
+            _id: channelInDb._id,
+            name: channelInDb.name,
+            iconURL: channelInDb.iconURL,
+            author: channelInDb.author
+        }
+
         const messageContent = req.body.content.slice(0, 500);
 
         const components = []
@@ -122,15 +135,12 @@ router.post("/send_message", async (req, res) => {
             user: user,
             content: messageContent,
             timestamp: Date.now(),
+            channel: channel
         });
 
         const datas = messageContent.split(" ").filter(messCon => messCon.startsWith("https://"));
         if (datas.length <= 0) {
-            const messageData = await Channel.findOneAndUpdate({ _id: channelId }, {
-                $push: {
-                    messages: message
-                }
-            })
+            const messageData = await message.save()
             return res.send({ content: "Posted message!", data: message });
         }
 
@@ -154,11 +164,7 @@ router.post("/send_message", async (req, res) => {
                         message.components = components
 
                         if (index === [...datas].length - 1) {
-                            const messageData = await Channel.findOneAndUpdate({ _id: channelId }, {
-                                $push: {
-                                    messages: message
-                                }
-                            })
+                            const messageData = await message.save()
                             return res.send({ content: "Posted message!", data: message });
                         }
                     })
@@ -172,11 +178,7 @@ router.post("/send_message", async (req, res) => {
                     message.components = components
 
                     if (index === [...datas].length - 1) {
-                        const messageData = await Channel.findOneAndUpdate({ _id: channelId }, {
-                            $push: {
-                                messages: message
-                            }
-                        })
+                        const messageData = await message.save()
                         return res.send({ content: "Posted message!", data: message });
                     }
                 }
@@ -196,18 +198,36 @@ router.get("/get_messages", async (req, res) => {
     const [scheme, token] = req.headers["authorization"].split(" ")
 
     try {
-        jwt.verify(token, process.env.JWT_SECRET, {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET, {
             complete: true,
         })
 
+        const userId = decoded.payload.uid
         const channelId = req.query.channel_id
         const channel = await Channel.findOne({ _id: channelId })
 
-        const allMessages = await channel.messages;
+        const userInDb = await User.findOne({ _id: userId })
+        const user = {
+            username: userInDb.username,
+            color: userInDb.color,
+            avatarURL: userInDb.avatarURL
+        }
+
+        const channelToCheck = {
+            _id: channel._id,
+            name: channel.name,
+            author: channel.author,
+            iconURL: channel.iconURL
+        }
+        if (channel.members.filter(ob => ob.username === user.username).length <= 0) return res.send({ message: "Author didnt joined you to the channel yet ask them to join" })
+
+        const allMessagesIndb = await Message.find({});
+
+        const allMessages = allMessagesIndb.filter(ob => JSON.stringify(ob.channel._id) === JSON.stringify(channel._id))
         try {
             if (allMessages.length === 0)
-                res.send({ EmptyChat: true, messages: allMessages, authenticated: true });
-            else res.send({ content: "Messages", messages: allMessages, authenticated: true, EmptyChat: false });
+                return res.send({ EmptyChat: true, messages: allMessages, authenticated: true });
+            else return res.send({ content: "Messages", messages: allMessages, authenticated: true, EmptyChat: false });
         } catch (error) {
             console.log(error);
         }
@@ -262,7 +282,7 @@ router.put("/profile", async (req, res) => {
         })
     } catch (e) {
         if (e.message === "jwt expired") {
-            res.sendStatus(401)
+            return res.sendStatus(401)
         }
     }
 });
@@ -298,9 +318,9 @@ router.get("/channels", async (req, res) => {
         const user = await User.findOne({ _id: userId })
         const userChannels = user.channels
 
-        res.send({ channels: userChannels })
+        return res.send({ channels: userChannels })
     } catch (e) {
-        if (e.message === "jwt expired") res.sendStatus(401)
+        if (e.message === "jwt expired") return res.sendStatus(401)
         console.log(e)
     }
 })
@@ -313,6 +333,7 @@ router.post("/channels", async (req, res) => {
         const authorInDb = await User.findOne({ _id: userId })
 
         const author = {
+            _id: authorInDb._id,
             username: authorInDb.username,
             avatarURL: authorInDb.avatarURL,
             color: authorInDb.color
@@ -338,9 +359,9 @@ router.post("/channels", async (req, res) => {
                     channels: channel
                 },
             })
-        res.send({ channel: channel })
+        return res.send({ channel: channel })
     } catch (e) {
-        if (e.message === "jwt expired") res.sendStatus(401)
+        if (e.message === "jwt expired") return res.sendStatus(401)
         console.log(e)
     }
 })
@@ -357,13 +378,19 @@ router.get("/add_user", async (req, res) => {
         const user = await User.findOne({ username: username })
         const channel = await Channel.findOne({ _id: channelId })
 
+
         const membersInChannel = channel.members
 
         const userToPush = {
+            _id: user._id,
             username: user.username,
             avatarURL: user.avatarURL,
             color: user.color
         }
+
+        console.log(membersInChannel, user)
+        if (JSON.stringify(channel.author._id) !== JSON.stringify(userId)) return res.send({ message: "You are not the author of this channel!" })
+        if (membersInChannel.filter(member => member._id === JSON.stringify(user._id)).length > 0) return res.send({ message: "User already exist in the channel!" })
 
         const channelToPush = {
             _id: channel._id,
@@ -385,9 +412,9 @@ router.get("/add_user", async (req, res) => {
                 channels: channelToPush
             }
         })
-        res.send({ success: true })
+        return res.send({ success: true, invited: userToPush })
     } catch (err) {
-        if (e.message === "jwt expired") res.sendStatus(401)
+        if (err.message === "jwt expired") return res.sendStatus(401)
         console.log(err)
     }
 })

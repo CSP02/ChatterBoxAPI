@@ -17,6 +17,10 @@ const messageSchema = new mongoose.Schema({
     },
     timestamp: {
         type: Date
+    },
+    channel: {
+        type: Object,
+        require: true
     }
 })
 

@@ -20,9 +20,6 @@ const channelSchema = new mongoose.Schema({
         type: [Object],
         required: true,
         default: [this.author]
-    },
-    messages: {
-        type: [Object]
     }
 })
 
