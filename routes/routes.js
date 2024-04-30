@@ -98,7 +98,7 @@ router.post("/login", async (req, res) => {
 });
 
 //post message to the database
-router.post("/send_message", async (req, res) => {
+router.post("/messages", async (req, res) => {
     if (!req.query) return res.send("error")
 
     const [scheme, token] = req.headers["authorization"].split(" ")
@@ -131,17 +131,18 @@ router.post("/send_message", async (req, res) => {
         const messageContent = req.body.content.slice(0, 500);
 
         const components = []
+        const timeStamp = Date.now()
         const message = new Message({
             user: user,
             content: messageContent,
-            timestamp: Date.now(),
+            timestamp: timeStamp,
             channel: channel
         });
 
         const datas = messageContent.split(" ").filter(messCon => messCon.startsWith("https://"));
         if (datas.length <= 0) {
             const messageData = await message.save()
-            return res.send({ content: "Posted message!", data: message });
+            return res.send({ content: "Posted message!", data: { user: user, content: messageContent, timestamp: timeStamp } });
         }
 
         [...datas].forEach(async (data, index) => {
@@ -193,7 +194,8 @@ router.post("/send_message", async (req, res) => {
     }
 });
 
-router.get("/get_messages", async (req, res) => {
+router.get("/messages", async (req, res) => {
+    console.time("send")
     if (!req.query) return res.send("Error")
     const [scheme, token] = req.headers["authorization"].split(" ")
 
@@ -204,6 +206,7 @@ router.get("/get_messages", async (req, res) => {
 
         const userId = decoded.payload.uid
         const channelId = req.query.channel_id
+        const chunkSize = req.query.chunk
         const channel = await Channel.findOne({ _id: channelId })
 
         const userInDb = await User.findOne({ _id: userId })
@@ -213,21 +216,30 @@ router.get("/get_messages", async (req, res) => {
             avatarURL: userInDb.avatarURL
         }
 
-        const channelToCheck = {
-            _id: channel._id,
-            name: channel.name,
-            author: channel.author,
-            iconURL: channel.iconURL
-        }
-        if (channel.members.filter(ob => ob.username === user.username).length <= 0) return res.send({ message: "Author didnt joined you to the channel yet ask them to join" })
+        if (channel.members.filter(ob => ob.username === user.username).length <= 0) return res.send({ message: "Author didnt added you to the channel yet ask them to add you!" })
 
         const allMessagesIndb = await Message.find({});
 
-        const allMessages = allMessagesIndb.filter(ob => JSON.stringify(ob.channel._id) === JSON.stringify(channel._id))
+        const allMessagesFiltered = allMessagesIndb.filter(ob => JSON.stringify(ob.channel._id) === JSON.stringify(channel._id))
+        const allMessages = []
+
+        allMessagesFiltered.forEach(message => {
+            const messageToPush = {
+                user: message.user,
+                content: message.content,
+                components: message.components,
+                timestamp: message.timestamp
+            }
+
+            allMessages.push(messageToPush)
+        })
+        const messagesToPush = allMessages.slice(allMessages.length - chunkSize, allMessages.length)
+        console.timeEnd("send")
         try {
-            if (allMessages.length === 0)
-                return res.send({ EmptyChat: true, messages: allMessages, authenticated: true });
-            else return res.send({ content: "Messages", messages: allMessages, authenticated: true, EmptyChat: false });
+            if (allMessages.length <= 15)
+                return res.send({ messages: allMessages});
+            else return res.send({ messages: messagesToPush });
+            // else return res.send({ messages: messagesToPush });
         } catch (error) {
             console.log(error);
         }
@@ -352,8 +364,8 @@ router.post("/channels", async (req, res) => {
             members: groupMembers
         })
 
-        const newChannel = await channel.save()
-        const authorUpdate = await User.findOneAndUpdate({ _id: userId },
+        await channel.save()
+        await User.findOneAndUpdate({ _id: userId },
             {
                 $push: {
                     channels: channel
@@ -388,7 +400,6 @@ router.get("/add_user", async (req, res) => {
             color: user.color
         }
 
-        console.log(membersInChannel, user)
         if (JSON.stringify(channel.author._id) !== JSON.stringify(userId)) return res.send({ message: "You are not the author of this channel!" })
         if (membersInChannel.filter(member => member._id === JSON.stringify(user._id)).length > 0) return res.send({ message: "User already exist in the channel!" })
 
