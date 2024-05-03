@@ -330,7 +330,17 @@ router.get("/channels", async (req, res) => {
         const user = await User.findOne({ _id: userId })
         const userChannels = user.channels
 
-        return res.send({ channels: userChannels })
+        const channelsData = []
+
+        user.channels.forEach(channel => {
+            channelsData.push({
+                iconURL: channel.iconURL,
+                name: channel.name,
+                _id: channel._id
+            })
+        })
+
+        return res.send({ channels: channelsData })
     } catch (e) {
         if (e.message === "jwt expired") return res.sendStatus(401)
         console.log(e)
