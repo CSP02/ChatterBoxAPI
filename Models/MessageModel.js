@@ -21,6 +21,9 @@ const messageSchema = new mongoose.Schema({
     channel: {
         type: Object,
         require: true
+    },
+    repliedTo:{
+        type: Object
     }
 })
 

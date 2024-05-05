@@ -117,7 +117,6 @@ router.post("/messages", async (req, res) => {
             avatarURL: avatarURL,
         };
 
-
         const channelInDb = await Channel.findOne({ _id: channelId })
         if (channelInDb.members.filter(ob => ob.username === user.username).length <= 0) return res.send({ message: "You dont have access to the channel!" })
 
@@ -129,15 +128,33 @@ router.post("/messages", async (req, res) => {
         }
 
         const messageContent = req.body.content.slice(0, 500);
+        const repliedTo = req.body.repliedTo
 
         const components = []
         const timeStamp = Date.now()
-        const message = new Message({
-            user: user,
-            content: messageContent,
-            timestamp: timeStamp,
-            channel: channel
-        });
+        let message
+        if (repliedTo) {
+            const repliedToUser = await User.findOne({ username: repliedTo.username })
+            message = new Message({
+                user: user,
+                content: messageContent,
+                timestamp: timeStamp,
+                channel: channel,
+                repliedTo: {
+                    username: repliedToUser.username,
+                    color: repliedToUser.color,
+                    avatarURL: repliedToUser.avatarURL,
+                    content: repliedTo.content
+                }
+            });
+        } else {
+            message = new Message({
+                user: user,
+                content: messageContent,
+                timestamp: timeStamp,
+                channel: channel
+            });
+        }
 
         const datas = messageContent.split(" ").filter(messCon => messCon.startsWith("https://"));
         if (datas.length <= 0) {
@@ -223,12 +240,13 @@ router.get("/messages", async (req, res) => {
         const allMessagesFiltered = allMessagesIndb.filter(ob => JSON.stringify(ob.channel._id) === JSON.stringify(channel._id))
         const allMessages = []
 
-        allMessagesFiltered.forEach(message => {
+        allMessagesFiltered.forEach(async message => {
             const messageToPush = {
                 user: message.user,
                 content: message.content,
                 components: message.components,
-                timestamp: message.timestamp
+                timestamp: message.timestamp,
+                repliedTo: message.repliedTo
             }
 
             allMessages.push(messageToPush)
@@ -237,7 +255,7 @@ router.get("/messages", async (req, res) => {
         console.timeEnd("send")
         try {
             if (allMessages.length <= 15)
-                return res.send({ messages: allMessages});
+                return res.send({ messages: allMessages });
             else return res.send({ messages: messagesToPush });
             // else return res.send({ messages: messagesToPush });
         } catch (error) {
