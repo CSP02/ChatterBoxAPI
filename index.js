@@ -34,6 +34,5 @@ apiServer.use(cors())
 apiServer.use("/api", router)
 
 apiServer.listen("3001", () => {
-    // console.clear()
     console.log("Listening to 3001")
 })

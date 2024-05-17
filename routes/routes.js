@@ -29,7 +29,7 @@ const saltRounds = 10;
  */
 //signup user with credentials
 router.post("/signup", async (req, res) => {
-    const username = req.body.username;
+    const username = req.body.username.replaceAll(" ", "_");
     const color = req.body.color.toString();
     const avatarURL = req.body.avatarURL
 
@@ -212,7 +212,6 @@ router.post("/messages", async (req, res) => {
 });
 
 router.get("/messages", async (req, res) => {
-    console.time("send")
     if (!req.query) return res.send("Error")
     const [scheme, token] = req.headers["authorization"].split(" ")
 
@@ -252,7 +251,6 @@ router.get("/messages", async (req, res) => {
             allMessages.push(messageToPush)
         })
         const messagesToPush = allMessages.slice(allMessages.length - chunkSize, allMessages.length)
-        console.timeEnd("send")
         try {
             if (allMessages.length <= 15)
                 return res.send({ messages: allMessages });
@@ -350,7 +348,7 @@ router.get("/channels", async (req, res) => {
 
         const channelsData = []
 
-        user.channels.forEach(channel => {
+        userChannels.forEach(channel => {
             channelsData.push({
                 iconURL: channel.iconURL,
                 name: channel.name,
