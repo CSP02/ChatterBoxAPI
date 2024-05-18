@@ -455,4 +455,24 @@ router.get("/add_user", async (req, res) => {
         console.log(err)
     }
 })
+
+router.get("/typing", async (req, res) => {
+    const [scheme, token] = req.headers.authorization.split(" ")
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET, { complete: true })
+        const userId = decoded.payload.uid
+
+        const channelId = req.query.channel_id
+        await Channel.findOne({ _id: channelId }).then(channel => {
+            const membersInChannel = channel.members
+            membersInChannel.forEach(member => {
+                // console.log(member._id.toString(), userId.toString(), member._id.toString() === userId.toString())
+                if (member._id.toString() === userId.toString()) return res.send({ success: true })
+            })
+        })
+    } catch (err) {
+        if (err.message === "jwt expired") return res.sendStatus(401)
+        console.log(err)
+    }
+})
 module.exports = router;
