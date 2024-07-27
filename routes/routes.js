@@ -374,10 +374,17 @@ router.put("/profile", isAuthorized, async (req, res) => {
             });
         });
         const updatedUser = await User.findOne({ _id: userId })
+        const user2send = {
+            _id: updatedUser._id,
+            username: updatedUser.username,
+            avatarURL: updatedUser.avatarURL,
+            color: updatedUser.color
+        }
+        
         return res.send({
             content: "User updated successfully",
             success: true,
-            updatedUser: updatedUser,
+            updatedUser: user2send,
         })
     } catch (e) {
         if (e.name === 'TokenExpiredError') return res.status(401).send({ error: types.ErrorTypes.JWT_EXPIRE })
