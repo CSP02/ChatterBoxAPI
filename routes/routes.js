@@ -12,6 +12,7 @@ const Channel = require("../Models/ChannelModel.js")
 const router = express.Router();
 const cheerio = require("cheerio")
 const jwt = require("jsonwebtoken");
+const isAuthorized = require("./middlewares/Authentication.js")
 
 /**
  * ? Other constants
@@ -32,14 +33,13 @@ const saltRounds = 10;
 router.post("/signup", [
     check('username').trim().isLength({ min: 3, max: 32 }),
     check('password').isLength({ min: 6, max: 32 }),
-    check('color').isHexColor(),
-    check('avatarURL').isURL()
+    check('color').isHexColor()
 ], async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
         return res.status(400).json({ errors: errors.array() });
     }
-    const username = req.body.username.replaceAll(" ", "_");
+    const username = req.body.username.replaceAll(" ", "_").slice(0, 31);
     const color = req.body.color.toString();
     const avatarURL = req.body.avatarURL
 
@@ -48,8 +48,8 @@ router.post("/signup", [
         const userDb = await User.find({ username });
 
         const user = new User({
-            username: username.slice(0, 31),
-            password: password.slice(0, 31),
+            username: username,
+            password: password,
             color: color.slice(0, 6),
             avatarURL: avatarURL.slice(0, 64)
         });
@@ -92,8 +92,11 @@ router.post("/login", async (req, res) => {
                     const userFound = {
                         username: user.username,
                         color: user.color,
-                        avatarURL: user.avatarURL
+                        avatarURL: user.avatarURL,
+                        status: 1
                     }
+                    user.status = 1
+                    user.save()
                     return res.send({ user: userFound, token: token, refreshToken: refreshToken });
                 }
                 return res.status(401).send({ error: types.ErrorTypes.INVALID_CREDENTIALS });
@@ -103,8 +106,21 @@ router.post("/login", async (req, res) => {
         }
     } catch (error) {
         console.log(error);
+        res.send(error)
     }
 });
+
+router.get("/logout", isAuthorized, async (req, res) => {
+    const [scheme, token] = req.headers.authorization.split(" ");
+    const decoded = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+    const uid = decoded.uid
+
+    const user = await User.findOne({ _id: uid });
+    user.status = 0
+    user.save()
+
+    return res.status(200).send({ success: types.SuccessTypes.SUCCESS })
+})
 
 const fetchWithTimeout = (url, options, timeout = 1000) => {
     return Promise.race([
@@ -116,18 +132,13 @@ const fetchWithTimeout = (url, options, timeout = 1000) => {
 };
 
 //post message to the database
-router.post("/messages", async (req, res) => {
-    if (!req.query.channel_id) return res.status(400).send("Channel ID is required");
-
-    const authHeader = req.headers["authorization"];
-    if (!authHeader) return res.status(401).send({ error: types.ErrorTypes.NULL_TOKEN });
-
+router.post("/messages", isAuthorized, async (req, res) => {
+    const authHeader = req.headers.authorization;
     const [scheme, token] = authHeader.split(" ");
-    if (!scheme || !token) return res.status(400).send({ error: "Invalid authorization header format" });
 
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET, { complete: true });
-        const decodedUserID = decoded.payload.uid;
+        const decoded = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+        const decodedUserID = decoded.uid;
 
         const userInDb = await User.findOne({ _id: decodedUserID });
         if (!userInDb) return res.status(404).send({ error: "User not found" });
@@ -148,27 +159,23 @@ router.post("/messages", async (req, res) => {
         const repliedTo = req.body.repliedTo;
 
         const user = {
-            username: userInDb.username,
-            color: userInDb.color,
-            avatarURL: userInDb.avatarURL,
+            _id: userInDb._id
         };
 
         const channel = {
-            _id: channelInDb._id,
-            name: channelInDb.name,
-            iconURL: channelInDb.iconURL,
-            author: channelInDb.author
+            _id: channelInDb._id
         };
 
         let message;
         if (repliedTo) {
             const repliedToMessage = await Message.findOne({ _id: repliedTo._id });
+            if (!repliedToMessage) console.log("unknown message")
             message = new Message({
                 user,
                 content: messageContent,
                 timestamp: Date.now(),
                 channel,
-                repliedTo: repliedToMessage ? repliedTo : undefined
+                repliedTo: repliedToMessage ? repliedToMessage._id : undefined
             });
         } else {
             message = new Message({
@@ -235,19 +242,35 @@ router.post("/messages", async (req, res) => {
     }
 });
 
-
-router.get("/messages", async (req, res) => {
+router.get("/get_users", isAuthorized, async (req, res) => {
     if (!req.query) return res.send({ error: types.ErrorTypes.INVALID_REQUEST })
-    if (!req.headers["authorization"]) return res.status(401).send({ error: types.ErrorTypes.NULL_TOKEN })
-    const [scheme, token] = req.headers["authorization"].split(" ")
+    const cid = req.query.cid
+
+    const channel = await Channel.findById(cid)
+    const members = channel.members
+    const mem2push = []
+    for (let i = 0; i < members.length; i++) {
+        const member = await User.findById(members[i]._id)
+        const mem = {
+            username: member.username,
+            avatarURL: member.avatarURL,
+            status: member.status,
+            color: member.color
+        }
+        mem2push.push(mem)
+    }
+
+    return res.status(200).send({ members: mem2push })
+})
+
+router.get("/messages", isAuthorized, async (req, res) => {
+    if (!req.query) return res.send({ error: types.ErrorTypes.INVALID_REQUEST })
+    const [scheme, token] = req.headers.authorization.split(" ")
 
     try {
+        const decoded = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
 
-        const decoded = jwt.verify(token, process.env.JWT_SECRET, {
-            complete: true,
-        })
-
-        const userId = decoded.payload.uid
+        const userId = decoded.uid
         const channelId = req.query.channel_id
         const chunkSize = req.query.chunk
         const channel = await Channel.findOne({ _id: channelId })
@@ -265,19 +288,32 @@ router.get("/messages", async (req, res) => {
 
         const processMessages = async () => {
             const messagePromises = allMessagesFiltered.map(async (message, index) => {
+                const _id = message.user._id
+                const messageAuthor = await User.findOne({ _id })
+
+                const userP = {
+                    username: messageAuthor.username,
+                    avatarURL: messageAuthor.avatarURL,
+                    color: messageAuthor.color
+                }
                 const messageToPush = {
                     _id: message._id,
-                    user: message.user,
+                    user: userP,
                     content: message.content,
                     components: message.components,
                     timestamp: message.timestamp
                 };
                 if (message.repliedTo) {
-                    const replyMsg = await Message.findOne({ _id: message.repliedTo._id });
+                    const replied_id = message.repliedTo
+                    const replyMsg = await Message.findOne({ _id: replied_id });
+                    const authorId = replyMsg.user._id
+                    const userDb = await User.findOne({ _id: authorId })
+
                     messageToPush.repliedTo = {
-                        username: replyMsg.user.username,
-                        color: replyMsg.user.color,
-                        avatarURL: replyMsg.user.avatarURL,
+                        _id: replied_id,
+                        username: userDb.username,
+                        color: userDb.color,
+                        avatarURL: userDb.avatarURL,
                         content: replyMsg.content.slice(0, 32) + "..."
                     };
                 }
@@ -297,7 +333,6 @@ router.get("/messages", async (req, res) => {
                 return res.status(500).send({ error: 'Internal Server Error' });
             }
         };
-
         processMessages();
     } catch (e) {
         console.log(e)
@@ -305,19 +340,16 @@ router.get("/messages", async (req, res) => {
     }
 })
 
-router.put("/profile", async (req, res) => {
+router.put("/profile", isAuthorized, async (req, res) => {
     const updateUsername = req.body.username;
     const color = req.body.color;
     const avatarURL = req.body.avatarURL;
-    if (!req.headers["authorization"]) return res.status(401).send({ error: types.ErrorTypes.NULL_TOKEN })
-    const [scheme, token] = req.headers["authorization"].split(" ")
+    const [scheme, token] = req.headers.authorization.split(" ")
 
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET, {
-            complete: true,
-        });
+        const decoded = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
 
-        const userId = decoded.payload.uid;
+        const userId = decoded.uid;
 
         const user = {
             username: updateUsername.slice(0, 32),
@@ -325,7 +357,7 @@ router.put("/profile", async (req, res) => {
             avatarURL: avatarURL.slice(0, 64),
         };
         const prevUser = await User.findOne({ _id: userId })
-        const isUsernameAvailable = await User.find({ username: updateUsername });
+        const isUsernameAvailable = await User.find({ username: updateUsername.slice(0, 31) });
 
         if (isUsernameAvailable.length > 0 && updateUsername !== prevUser.username) return res.send({ content: "Username already exists", success: false })
 
@@ -352,12 +384,12 @@ router.put("/profile", async (req, res) => {
     }
 });
 
-router.get("/request_new_token", async (req, res) => {
-    if (!req.headers["authorization"]) return res.status(401).send({ error: types.ErrorTypes.NULL_TOKEN })
-    const [scheme, refreshToken] = req.headers["authorization"].split(" ")
+router.get("/request_new_token", isAuthorized, async (req, res) => {
+    const [scheme, refreshToken] = req.headers.authorization.split(" ")
 
-    const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET, { complete: true })
-    const user = await User.findOne({ _id: decoded.payload.uid })
+    const decoded = JSON.parse(Buffer.from(refreshToken.split('.')[1], 'base64').toString());
+
+    const user = await User.findOne({ _id: decoded.uid })
     const newToken = jwt.sign(
         { uid: user._id },
         process.env.JWT_SECRET,
@@ -376,12 +408,11 @@ router.get("/request_new_token", async (req, res) => {
 /**
  * ? Future update
  */
-router.get("/channels", async (req, res) => {
-    if (!req.headers["authorization"]) return res.status(401).send({ error: types.ErrorTypes.NULL_TOKEN })
+router.get("/channels", isAuthorized, async (req, res) => {
     const [scheme, token] = req.headers.authorization.split(" ")
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET, { complete: true })
-        const userId = decoded.payload.uid
+        const decoded = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+        const userId = decoded.uid
         const user = await User.findOne({ _id: userId })
         const userChannels = user.channels
 
@@ -395,19 +426,19 @@ router.get("/channels", async (req, res) => {
             })
         })
 
-        return res.send({ channels: channelsData })
+        return res.status(200).send({ channels: channelsData })
     } catch (e) {
         if (e.name === 'TokenExpiredError') return res.status(401).send({ error: types.ErrorTypes.JWT_EXPIRE })
         console.log(e)
     }
 })
 
-router.post("/channels", async (req, res) => {
-    if (!req.headers["authorization"]) return res.status(401).send({ error: types.ErrorTypes.NULL_TOKEN })
+router.post("/channels", isAuthorized, async (req, res) => {
     const [scheme, token] = req.headers.authorization.split(" ")
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET, { complete: true })
-        const userId = decoded.payload.uid
+        const decoded = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+
+        const userId = decoded.uid
         const authorInDb = await User.findOne({ _id: userId })
 
         const author = {
@@ -430,6 +461,9 @@ router.post("/channels", async (req, res) => {
             members: groupMembers
         })
 
+        const user = await User.findOne({ _id: userId })
+
+        if (user.channels.length >= 10) return res.send({ error: "You can only have 10 channels" });
         await channel.save()
         await User.findOneAndUpdate({ _id: userId },
             {
@@ -444,12 +478,12 @@ router.post("/channels", async (req, res) => {
     }
 })
 
-router.get("/search_user", async (req, res) => {
-    if (!req.headers["authorization"]) return res.status(401).send({ error: types.ErrorTypes.NULL_TOKEN })
+router.get("/search_user", isAuthorized, async (req, res) => {
     const username = req.query.username
     const [scheme, token] = req.headers.authorization.split(" ")
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET, { complete: true })
+        const decoded = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+
         const user = await User.findOne({ username })
 
         if (user) return res.send({ username: user.username, avatarURL: user.avatarURL })
@@ -460,12 +494,12 @@ router.get("/search_user", async (req, res) => {
     }
 })
 
-router.get("/add_user", async (req, res) => {
-    if (!req.headers["authorization"]) return res.status(401).send({ error: types.ErrorTypes.NULL_TOKEN })
+router.get("/add_user", isAuthorized, async (req, res) => {
     const [scheme, token] = req.headers.authorization.split(" ")
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET, { complete: true })
-        const userId = decoded.payload.uid
+        const decoded = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+
+        const userId = decoded.uid
 
         const username = req.query.username
         const channelId = req.query.channel_id
@@ -513,12 +547,12 @@ router.get("/add_user", async (req, res) => {
     }
 })
 
-router.get("/typing", async (req, res) => {
-    if (!req.headers["authorization"]) return res.status(401).send({ error: types.ErrorTypes.NULL_TOKEN })
+router.get("/typing", isAuthorized, async (req, res) => {
     const [scheme, token] = req.headers.authorization.split(" ")
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET, { complete: true })
-        const userId = decoded.payload.uid
+        const decoded = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+
+        const userId = decoded.uid
 
         const channelId = req.query.channel_id
         await Channel.findOne({ _id: channelId }).then(channel => {

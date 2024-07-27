@@ -23,6 +23,10 @@ const userSchema = new mongoose.Schema({
     },
     channels: {
         type: [Object]
+    },
+    status: {
+        type: Number,
+        default: 0
     }
 })
 
