@@ -112,7 +112,7 @@ router.post("/login", async (req, res) => {
 
 router.get("/logout", isAuthorized, async (req, res) => {
     const [scheme, token] = req.headers.authorization.split(" ");
-    const decoded = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+    const decoded = req.decoded(Buffer.from(token.split('.')[1], 'base64').toString());
     const uid = decoded.uid
 
     const user = await User.findOne({ _id: uid });
@@ -137,7 +137,7 @@ router.post("/messages", isAuthorized, async (req, res) => {
     const [scheme, token] = authHeader.split(" ");
 
     try {
-        const decoded = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+        const decoded = req.decoded(Buffer.from(token.split('.')[1], 'base64').toString());
         const decodedUserID = decoded.uid;
 
         const userInDb = await User.findOne({ _id: decodedUserID });
@@ -268,7 +268,7 @@ router.get("/messages", isAuthorized, async (req, res) => {
     const [scheme, token] = req.headers.authorization.split(" ")
 
     try {
-        const decoded = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+        const decoded = req.decoded(Buffer.from(token.split('.')[1], 'base64').toString());
 
         const userId = decoded.uid
         const channelId = req.query.channel_id
@@ -347,7 +347,7 @@ router.put("/profile", isAuthorized, async (req, res) => {
     const [scheme, token] = req.headers.authorization.split(" ")
 
     try {
-        const decoded = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+        const decoded = req.decoded(Buffer.from(token.split('.')[1], 'base64').toString());
 
         const userId = decoded.uid;
 
@@ -380,7 +380,7 @@ router.put("/profile", isAuthorized, async (req, res) => {
             avatarURL: updatedUser.avatarURL,
             color: updatedUser.color
         }
-        
+
         return res.send({
             content: "User updated successfully",
             success: true,
@@ -394,7 +394,7 @@ router.put("/profile", isAuthorized, async (req, res) => {
 router.get("/request_new_token", isAuthorized, async (req, res) => {
     const [scheme, refreshToken] = req.headers.authorization.split(" ")
 
-    const decoded = JSON.parse(Buffer.from(refreshToken.split('.')[1], 'base64').toString());
+    const decoded = req.decoded(Buffer.from(refreshToken.split('.')[1], 'base64').toString());
 
     const user = await User.findOne({ _id: decoded.uid })
     const newToken = jwt.sign(
@@ -418,7 +418,7 @@ router.get("/request_new_token", isAuthorized, async (req, res) => {
 router.get("/channels", isAuthorized, async (req, res) => {
     const [scheme, token] = req.headers.authorization.split(" ")
     try {
-        const decoded = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+        const decoded = req.decoded(Buffer.from(token.split('.')[1], 'base64').toString());
         const userId = decoded.uid
         const user = await User.findOne({ _id: userId })
         const userChannels = user.channels
@@ -443,7 +443,7 @@ router.get("/channels", isAuthorized, async (req, res) => {
 router.post("/channels", isAuthorized, async (req, res) => {
     const [scheme, token] = req.headers.authorization.split(" ")
     try {
-        const decoded = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+        const decoded = req.decoded(Buffer.from(token.split('.')[1], 'base64').toString());
 
         const userId = decoded.uid
         const authorInDb = await User.findOne({ _id: userId })
@@ -489,7 +489,7 @@ router.get("/search_user", isAuthorized, async (req, res) => {
     const username = req.query.username
     const [scheme, token] = req.headers.authorization.split(" ")
     try {
-        const decoded = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+        const decoded = req.decoded(Buffer.from(token.split('.')[1], 'base64').toString());
 
         const user = await User.findOne({ username })
 
@@ -504,7 +504,7 @@ router.get("/search_user", isAuthorized, async (req, res) => {
 router.get("/add_user", isAuthorized, async (req, res) => {
     const [scheme, token] = req.headers.authorization.split(" ")
     try {
-        const decoded = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+        const decoded = req.decoded(Buffer.from(token.split('.')[1], 'base64').toString());
 
         const userId = decoded.uid
 
@@ -523,7 +523,7 @@ router.get("/add_user", isAuthorized, async (req, res) => {
             avatarURL: user.avatarURL,
             color: user.color
         }
-        console.log(membersInChannel.filter(member => member._id.toString() === user._id.toString()))
+        
         if (JSON.stringify(channel.author._id) !== JSON.stringify(userId)) return res.status(401).send({ error: types.ErrorTypes.PERMISSIONS })
         if (membersInChannel.filter(member => member._id.toString() === user._id.toString()).length > 0) return res.send({ error: types.ErrorTypes.USER_ALREADY_EXIST })
 
@@ -557,7 +557,7 @@ router.get("/add_user", isAuthorized, async (req, res) => {
 router.get("/typing", isAuthorized, async (req, res) => {
     const [scheme, token] = req.headers.authorization.split(" ")
     try {
-        const decoded = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+        const decoded = req.decoded(Buffer.from(token.split('.')[1], 'base64').toString());
 
         const userId = decoded.uid
 
