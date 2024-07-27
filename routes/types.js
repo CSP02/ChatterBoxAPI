@@ -17,7 +17,8 @@ class Types {
             PERMISSIONS: 5,
             INVALID_REQUEST: 6,
             INVALID_CREDENTIALS: 7,
-            NULL_CONTENT: 8
+            NULL_CONTENT: 8,
+            VERIFICATION_FAILED: 9
         })
 
         this.SuccessTypes = Object.freeze({
