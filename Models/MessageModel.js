@@ -22,8 +22,12 @@ const messageSchema = new mongoose.Schema({
         type: Object,
         require: true
     },
-    repliedTo:{
+    repliedTo: {
         type: Object
+    },
+    edited: {
+        type: Boolean,
+        default: false,
     }
 })
 
