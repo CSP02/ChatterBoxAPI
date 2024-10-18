@@ -224,19 +224,23 @@ module.exports = (router) => {
     })
 
     router.put("/edit_msg", isAuthorized, async (req, res) => {
-        try{
+        try {
             const content = req.body.content;
             const messageId = req.query.id;
+            const userId = req.decoded.uid;
+            const message = await Message.findOne({ _id: messageId });
 
-            await Message.findOneAndUpdate({_id: messageId}, {
+            if (message.user._id !== userId) return res.status(401).send({ error: types.ErrorTypes.INVALID_CREDENTIALS });
+
+            await Message.findOneAndUpdate({ _id: messageId }, {
                 $set: {
                     edited: true,
                     content: content
                 }
             });
 
-            res.send({success: types.SuccessTypes.SUCCESS});
-        }catch(e){
+            res.send({ success: types.SuccessTypes.SUCCESS });
+        } catch (e) {
             console.log(e)
         }
     })
