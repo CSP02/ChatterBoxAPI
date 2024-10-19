@@ -113,7 +113,7 @@ module.exports = (router) => {
             }
 
             await message.save();
-            return res.sendStatus(200);
+            return res.status(200).send({ messageId: message._id });
 
         } catch (e) {
             console.error(e);
@@ -208,14 +208,14 @@ module.exports = (router) => {
         }
     })
 
-    router.get("/delete_msg", isAuthorized, async (req, res) => {
+    router.delete("/delete_msg", isAuthorized, async (req, res) => {
         try {
             const messageId = req.query.id;
             const uid = req.decoded.uid;
 
             const message = await Message.findOne({ _id: messageId });
             if (message.user._id.toString() === uid.toString()) {
-                const delMsg = await Message.findOneAndDelete({ _id: messageId });
+                await Message.findOneAndDelete({ _id: messageId });
                 res.status(200).send({ success: types.SuccessTypes.SUCCESS });
             }
         } catch (e) {
@@ -230,7 +230,7 @@ module.exports = (router) => {
             const userId = req.decoded.uid;
             const message = await Message.findOne({ _id: messageId });
 
-            if (message.user._id !== userId) return res.status(401).send({ error: types.ErrorTypes.INVALID_CREDENTIALS });
+            if (message.user._id.toString() !== userId.toString()) return res.status(401).send({ error: types.ErrorTypes.INVALID_CREDENTIALS });
 
             await Message.findOneAndUpdate({ _id: messageId }, {
                 $set: {
