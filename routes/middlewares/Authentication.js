@@ -11,7 +11,7 @@ const isAuthorized = async (req, res, next) => {
         req.decoded = jwt.verify(token, process.env.JWT_SECRET, { complete: true }).payload;
     } catch (e) {
         if (e.message === "jwt expired") return res.status(401).send({ error: types.ErrorTypes.JWT_EXPIRE });
-        else return res.send(401).send({error: types.ErrorTypes.VERIFICATION_FAILED});
+        else return res.status(401).send({error: types.ErrorTypes.VERIFICATION_FAILED});
     }
     return next();
 }

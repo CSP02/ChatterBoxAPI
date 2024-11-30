@@ -96,13 +96,20 @@ module.exports = (router) => {
                             };
                             components.push(embed);
                         } else if (contentType.includes("image")) {
-                            const embed = {
-                                type: types.ComponentTypes.IMAGE,
-                                imageURL: data
-                            };
-                            components.push(embed);
+                            if (contentType.includes("gif")) {
+                                const embed = {
+                                    type: types.ComponentTypes.GIF,
+                                    imageURL: data
+                                };
+                                components.push(embed);
+                            } else {
+                                const embed = {
+                                    type: types.ComponentTypes.IMAGE,
+                                    imageURL: data
+                                };
+                                components.push(embed);
+                            }
                         }
-
                         message.components = components;
                     } catch (e) {
                         console.error("Error fetching URL:", e);
