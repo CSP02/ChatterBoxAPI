@@ -22,7 +22,7 @@ const userSchema = new mongoose.Schema({
         default: "#ff0000"
     },
     channels: {
-        type: [Object]
+        type: [mongoose.Types.ObjectId]
     },
     status: {
         type: Number,

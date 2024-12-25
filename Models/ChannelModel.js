@@ -13,11 +13,11 @@ const channelSchema = new mongoose.Schema({
         required: false
     },
     author: {
-        type: Object,
+        type: mongoose.Types.ObjectId,
         required: true
     },
     members: {
-        type: [Object],
+        type: [mongoose.Types.ObjectId],
         required: true,
         default: [this.author]
     }

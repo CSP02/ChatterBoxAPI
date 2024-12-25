@@ -23,15 +23,13 @@ module.exports = (router) => {
             const decoded = req.decoded;
             const decodedUserID = decoded.uid;
 
-            const userInDb = await User.findOne({ _id: decodedUserID });
-            if (!userInDb) return res.status(404).send({ error: types.ErrorTypes.NOT_FOUND });
-
+            const userInDb = await User.findById(decodedUserID);
             const channelId = req.query.channel_id;
-            const channelInDb = await Channel.findOne({ _id: channelId });
-            if (!channelInDb) return res.status(404).send({ error: types.ErrorTypes.NOT_FOUND });
+            const channelInDb = await Channel.findById(channelId);
+            if (!userInDb || !channelInDb) return res.status(404).send({ error: types.ErrorTypes.NOT_FOUND });
 
-            if (!channelInDb.members.some(member => member.username === userInDb.username)) {
-                return res.status(403).send({ message: "You don't have permissions to access this channel!", error: types.ErrorTypes.PERMISSIONS });
+            if (!channelInDb.members.some(member => member.toString() === decodedUserID.toString())) {
+                return res.status(403).send({ error: types.ErrorTypes.PERMISSIONS });
             }
 
             if (!req.body.content || typeof req.body.content !== 'string' || req.body.content.trim() === "") {
@@ -41,47 +39,35 @@ module.exports = (router) => {
             const messageContent = req.body.content.slice(0, 500).trim();
             const repliedTo = req.body.repliedTo;
 
-            const user = {
-                _id: userInDb._id
-            };
-
-            const channel = {
-                _id: channelInDb._id
-            };
+            const user = userInDb._id;
+            const channel = channelInDb._id;
 
             let message;
+            message = new Message({
+                user,
+                content: messageContent,
+                timestamp: Date.now(),
+                channel
+            });
             if (repliedTo) {
                 const repliedToMessage = await Message.findOne({ _id: repliedTo._id });
                 if (!repliedToMessage) console.log("unknown message")
-                message = new Message({
-                    user,
-                    content: messageContent,
-                    timestamp: Date.now(),
-                    channel,
-                    repliedTo: repliedToMessage ? repliedToMessage._id : undefined
-                });
-            } else {
-                message = new Message({
-                    user,
-                    content: messageContent,
-                    timestamp: Date.now(),
-                    channel
-                });
+                message.repliedTo = repliedToMessage ? repliedToMessage._id : undefined;
             }
 
-            const datas = messageContent.split(/\s/g).filter(messCon => messCon.startsWith("https://"));
+            const datas = messageContent.split(/\s+/g).filter(messCon => messCon.startsWith("https://"));
             const components = [];
 
             if (datas.length > 0) {
                 const urlFetchPromises = datas.map(async (data) => {
-                    try {
-                        await fetchWithTimeout(data, { mode: "cors", method: "GET" });
-                    } catch (e) {
-                        return;  // Skip invalid URLs
-                    }
+                    let response;
+                    // try {
+                    // } catch (e) {
+                    //     return;  // Skip invalid URLs
+                    // }
 
                     try {
-                        const response = await fetchWithTimeout(data, { mode: "cors", method: "GET" });
+                        response = await fetchWithTimeout(data, { mode: "cors", method: "GET" });
                         if (!response.ok) return;
                         const contentType = response.headers.get("Content-Type");
                         if (contentType.includes("text/html")) {
@@ -110,6 +96,7 @@ module.exports = (router) => {
                                 components.push(embed);
                             }
                         }
+
                         message.components = components;
                     } catch (e) {
                         console.error("Error fetching URL:", e);
@@ -136,24 +123,24 @@ module.exports = (router) => {
             const userId = decoded.uid;
             const channelId = req.query.channel_id;
             const chunkSize = req.query.chunk;
-            const channel = await Channel.findOne({ _id: channelId });
+            const channel = await Channel.findById(channelId);
 
             let maxMessages = false;
 
-            const userInDb = await User.findOne({ _id: userId });
-            const user = {
-                username: userInDb.username,
-                color: userInDb.color,
-                avatarURL: userInDb.avatarURL
-            };
+            const userInDb = await User.findById(userId);
+            // const user = {
+            //     username: userInDb.username,
+            //     color: userInDb.color,
+            //     avatarURL: userInDb.avatarURL
+            // };
 
-            if (channel.members.filter(ob => ob.username === user.username).length <= 0) return res.status(401).send({ message: "Author didnt added you to the channel yet! Ask them to add you!", error: types.ErrorTypes.NOT_FOUND });
-            const allMessagesIndb = await Message.find({});
-            const allMessagesFiltered = allMessagesIndb.filter(ob => channel._id.toString() === ob.channel._id.toString());
-            if (chunkSize >= allMessagesFiltered.length) maxMessages = true;
+            if (channel.members.filter(ob => ob.toString() === userInDb._id.toString()).length <= 0) return res.status(401).send({ error: types.ErrorTypes.NOT_FOUND });
+            const allMessagesIndb = await Message.find({ channel: channelId });
+            // const allMessagesFiltered = allMessagesIndb.filter(ob => channel._id.toString() === ob.channel._id.toString());
+            if (chunkSize >= allMessagesIndb.length) maxMessages = true;
             const processMessages = async () => {
-                const messagePromises = allMessagesFiltered.map(async (message, index) => {
-                    const _id = message.user._id;
+                const messagePromises = allMessagesIndb.map(async (message, index) => {
+                    const _id = message.user;
                     const messageAuthor = await User.findOne({ _id });
 
                     const userP = {
@@ -181,7 +168,7 @@ module.exports = (router) => {
                                 content: "This message was deleted!",
                             };
                         } else {
-                            const authorId = replyMsg.user._id;
+                            const authorId = replyMsg.user;
                             const userDb = await User.findOne({ _id: authorId });
 
                             messageToPush.repliedTo = {
@@ -221,7 +208,7 @@ module.exports = (router) => {
             const uid = req.decoded.uid;
 
             const message = await Message.findOne({ _id: messageId });
-            if (message.user._id.toString() === uid.toString()) {
+            if (message.user.toString() === uid.toString()) {
                 await Message.findOneAndDelete({ _id: messageId });
                 res.status(200).send({ success: types.SuccessTypes.SUCCESS });
             }
@@ -237,7 +224,7 @@ module.exports = (router) => {
             const userId = req.decoded.uid;
             const message = await Message.findOne({ _id: messageId });
 
-            if (message.user._id.toString() !== userId.toString()) return res.status(401).send({ error: types.ErrorTypes.INVALID_CREDENTIALS });
+            if (message.user.toString() !== userId.toString()) return res.status(401).send({ error: types.ErrorTypes.INVALID_CREDENTIALS });
 
             await Message.findOneAndUpdate({ _id: messageId }, {
                 $set: {

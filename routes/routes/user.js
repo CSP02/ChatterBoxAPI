@@ -4,41 +4,57 @@ const bcrypt = require("bcrypt");
 const User = require("../../Models/UserModel.js");
 const Channel = require("../../Models/ChannelModel.js");
 const isAuthorized = require("../middlewares/Authentication.js");
+const cloudinary = require('cloudinary');
+const fs = require("fs");
+const multer = require("multer");
 const types = new Types();
 
 const saltRounds = 10;
 
 module.exports = (router) => {
-    router.post("/signup", [
-        check('username').trim().isLength({ min: 3, max: 32 }),
-        check('password').isLength({ min: 8, max: 32 }),
-        check('color').isHexColor()
-    ], async (req, res) => {
-        const errors = validationResult(req);
-        if (!errors.isEmpty()) {
-            return res.status(400).json({ errors: errors.array() });
-        }
-        const username = req.body.username.replaceAll(" ", "_").slice(0, 31);
+    const storage = multer.diskStorage({
+        destination: (req, file, cb) => {
+            cb(null, 'uploads/users/');
+        },
+        filename: (req, file, cb) => {
+            cb(null, file.originalname);
+        },
+    });
+
+    const upload = multer({ storage: storage, limits: { fileSize: 1000000 } });
+
+    router.post("/signup", upload.single("avatarURL"), async (req, res) => {
+        const username = req.body.username.replaceAll(/\s+/g, "_").slice(0, 31);
         const color = req.body.color.toString();
-        const avatarURL = req.body.avatarURL;
 
         bcrypt.hash(req.body.password, saltRounds, async (err, hashedPassword) => {
-            const password = hashedPassword;
-            const userDb = await User.find({ username });
-
-            const user = new User({
-                username: username,
-                password: password,
-                color: color.slice(0, 6),
-                avatarURL: avatarURL.slice(0, 128)
-            });
-
             try {
-                if (userDb.length > 0)
+                const password = hashedPassword;
+                const userDb = await User.findOne({ username });
+
+                const user = new User({
+                    username: username,
+                    password: password,
+                    color: color.slice(0, 6),
+                });
+
+                const result = await cloudinary.v2.uploader
+                    .upload("uploads/users/" + req.file.originalname, {
+                        folder: 'chatterbox/pfps/',
+                        resource_type: 'image',
+                        public_id: user._id
+                    });
+                const avatarURL = result.secure_url;
+
+                fs.rm("uploads/users/" + req.file.originalname, (err) => {
+                    if (err) throw err;
+                });
+                user.avatarURL = avatarURL;
+                if (userDb && userDb.length > 0)
                     return res.status(400).send({ error: types.ErrorTypes.UNAME_NOT_AVAILABLE });
 
                 const userData = await user.save();
-                return res.send({ user: userData });
+                return res.status(200).send({ user: userData });
             } catch (error) {
                 console.log(error);
             }
@@ -53,7 +69,7 @@ module.exports = (router) => {
         const members = channel.members;
         const mem2push = [];
         for (let i = 0; i < members.length; i++) {
-            const member = await User.findById(members[i]._id);
+            const member = await User.findById(members[i]);
             const mem = {
                 username: member.username,
                 avatarURL: member.avatarURL,

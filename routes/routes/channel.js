@@ -2,6 +2,9 @@ const { Types } = require("../types.js");
 const User = require("../../Models/UserModel.js");
 const Channel = require("../../Models/ChannelModel.js");
 const isAuthorized = require("../middlewares/Authentication.js");
+const cloudinary = require('cloudinary');
+const fs = require("fs");
+const multer = require("multer");
 const types = new Types();
 
 module.exports = (router) => {
@@ -9,62 +12,115 @@ module.exports = (router) => {
         try {
             const decoded = req.decoded;
             const userId = decoded.uid;
-            const user = await User.findOne({ _id: userId });
+            const user = await User.findById(userId);
             const userChannels = user.channels;
 
             const channelsData = [];
 
-            userChannels.forEach(channel => {
+            Promise.all(userChannels.map(async (channelId) => {
+                const channel = await Channel.findById(channelId);
                 channelsData.push({
                     iconURL: channel.iconURL,
                     name: channel.name,
                     _id: channel._id
                 });
+            })).then(() => {
+                return res.status(200).send({ channels: channelsData });
+            }).catch(error => {
+                console.error(error);
+                return res.status(500).send({ error: 'An error occurred' });
             });
-
-            return res.status(200).send({ channels: channelsData });
         } catch (e) {
             console.log(e);
         }
-    })
+    });
 
-    router.post("/channels", isAuthorized, async (req, res) => {
+
+    const storage = multer.diskStorage({
+        destination: (req, file, cb) => {
+            cb(null, 'uploads/channels/');
+        },
+        filename: (req, file, cb) => {
+            cb(null, file.originalname);
+        },
+    });
+
+    const upload = multer({ storage: storage, limits: { fileSize: 1000000 } });
+
+    router.post("/channels", isAuthorized, upload.single("channelIcon"), async (req, res) => {
         try {
             const decoded = req.decoded;
-
             const userId = decoded.uid;
-            const authorInDb = await User.findOne({ _id: userId });
-
-            const author = {
-                _id: authorInDb._id,
-                username: authorInDb.username,
-                avatarURL: authorInDb.avatarURL,
-                color: authorInDb.color
-            };
 
             const groupMembers = [];
-            groupMembers.push(author);
+            groupMembers.push(userId);
 
             const channelName = req.body.channelName;
-            const iconURL = req.body.iconURL ? iconURL : "";
 
             const channel = new Channel({
                 name: channelName,
-                iconURL: iconURL,
-                author: author,
+                author: userId,
                 members: groupMembers
             });
 
-            const user = await User.findOne({ _id: userId });
+            const result = await cloudinary.v2.uploader
+                .upload("uploads/channels/" + req.file.originalname, {
+                    folder: 'chatterbox/channelIcons/',
+                    resource_type: 'image',
+                    public_id: channel._id
+                });
+            const iconURL = result.secure_url;
+            channel.iconURL = iconURL;
+            fs.rm("uploads/channels/" + req.file.originalname, (err) => {
+                if (err) throw err;
+            });
+
+            const user = await User.findById(userId);
 
             if (user.channels.length >= 10) return res.send({ error: types.ErrorTypes.CHANNEL_LIMIT });
             await channel.save();
             await User.findOneAndUpdate({ _id: userId },
                 {
                     $push: {
-                        channels: channel
+                        channels: channel._id
                     },
                 });
+            return res.send({ channel: channel });
+        } catch (e) {
+            console.log(e);
+        }
+    });
+
+    router.put("/channels", isAuthorized, upload.single("channelIcon"), async (req, res) => {
+        try {
+            const decoded = req.decoded;
+            const userId = decoded.uid;
+            const channelId = req.query.id;
+
+            const channelName = req.body.channelName;
+            const channel = {
+                name: channelName
+            }
+            channel.name = channelName;
+
+            const result = await cloudinary.v2.uploader
+                .upload("uploads/channels/" + req.file.originalname, {
+                    folder: 'chatterbox/channelIcons/',
+                    resource_type: 'image',
+                    public_id: channelId
+                });
+
+            const iconURL = result.secure_url;
+            channel.iconURL = iconURL;
+
+            fs.rm("uploads/channels/" + req.file.originalname, (err) => {
+                if (err) throw err;
+            });
+
+            const user = await User.findById(userId);
+
+            if (user.channels.length >= 10) return res.send({ error: types.ErrorTypes.CHANNEL_LIMIT });
+            await Channel.findOneAndUpdate({ _id: channelId }, channel);
             return res.send({ channel: channel });
         } catch (e) {
             console.log(e);
@@ -74,17 +130,13 @@ module.exports = (router) => {
     router.get("/add_user", isAuthorized, async (req, res) => {
         try {
             const decoded = req.decoded;
-
-            const userId = decoded.uid;
-
             const username = req.query.username;
             const channelId = req.query.channel_id;
 
+            const userId = decoded.uid;
             const user = await User.findOne({ username: username });
-            const channel = await Channel.findOne({ _id: channelId });
-
-
-            const membersInChannel = channel.members;
+            const channel = await Channel.findById(channelId);
+            const membersInChannel = await channel.members.filter(member => member === user._id);
 
             const userToPush = {
                 _id: user._id,
@@ -94,26 +146,17 @@ module.exports = (router) => {
             };
 
             if (JSON.stringify(channel.author._id) !== JSON.stringify(userId)) return res.status(401).send({ error: types.ErrorTypes.PERMISSIONS });
-            if (membersInChannel.filter(member => member._id.toString() === user._id.toString()).length > 0) return res.send({ error: types.ErrorTypes.USER_ALREADY_EXIST });
+            if (membersInChannel.length !== 0) return res.status(403).send({ error: types.ErrorTypes.ALREADY_EXISTS });
 
-            const channelToPush = {
-                _id: channel._id,
-                name: channel.name,
-                iconURL: channel.iconURL,
-                author: channel.author
-            };
-
-            membersInChannel.push(userToPush);
-
-            const updatedChannel = await Channel.findOneAndUpdate({ _id: channelId }, {
-                $set: {
-                    members: membersInChannel
+            await Channel.findOneAndUpdate({ _id: channelId }, {
+                $push: {
+                    members: user._id
                 }
             });
 
-            const updatedUser = await User.findOneAndUpdate({ username: username }, {
+            await User.findOneAndUpdate({ username: username }, {
                 $push: {
-                    channels: channelToPush
+                    channels: channelId
                 }
             })
             return res.send({ invited: userToPush })
