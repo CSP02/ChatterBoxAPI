@@ -13,7 +13,8 @@ module.exports = (router) => {
             cb(null, 'uploads/users/');
         },
         filename: (req, file, cb) => {
-            cb(null, file.originalname);
+            if (file)
+                cb(null, file.originalname);
         },
     });
 
@@ -27,17 +28,20 @@ module.exports = (router) => {
             const decoded = req.decoded;
             const userId = decoded.uid;
 
-            const result = await cloudinary.v2.uploader
-                .upload("uploads/users/" + req.file.originalname, {
-                    folder: 'chatterbox/pfps/',
-                    resource_type: 'image',
-                    public_id: userId
-                });
-            const avatarURL = result.secure_url;
+            let result = "";
+            if (req.file)
+                result = await cloudinary.v2.uploader
+                    .upload("uploads/users/" + req.file.originalname, {
+                        folder: 'chatterbox/pfps/',
+                        resource_type: 'image',
+                        public_id: userId
+                    });
+            const avatarURL = result === "" ? result.secure_url : "";
 
-            fs.rm("uploads/" + req.file.originalname, (err) => {
-                if (err) throw err;
-            });
+            if (req.file)
+                fs.rm("uploads/" + req.file.originalname, (err) => {
+                    if (err) throw err;
+                });
 
             const user = {
                 username: updateUsername.slice(0, 32),
