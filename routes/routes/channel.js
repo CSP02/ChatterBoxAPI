@@ -41,7 +41,8 @@ module.exports = (router) => {
             cb(null, 'uploads/channels/');
         },
         filename: (req, file, cb) => {
-            cb(null, file.originalname);
+            if (file)
+                cb(null, file.originalname);
         },
     });
 
@@ -63,17 +64,20 @@ module.exports = (router) => {
                 members: groupMembers
             });
 
-            const result = await cloudinary.v2.uploader
-                .upload("uploads/channels/" + req.file.originalname, {
-                    folder: 'chatterbox/channelIcons/',
-                    resource_type: 'image',
-                    public_id: channel._id
-                });
-            const iconURL = result.secure_url;
+            let result = null;
+            if (req.file)
+                result = await cloudinary.v2.uploader
+                    .upload("uploads/channels/" + req.file.originalname, {
+                        folder: 'chatterbox/channelIcons/',
+                        resource_type: 'image',
+                        public_id: channel._id
+                    });
+            const iconURL = result !== null ? result.secure_url : result;
             channel.iconURL = iconURL;
-            fs.rm("uploads/channels/" + req.file.originalname, (err) => {
-                if (err) throw err;
-            });
+            if (req.file)
+                fs.rm("uploads/channels/" + req.file.originalname, (err) => {
+                    if (err) throw err;
+                });
 
             const user = await User.findById(userId);
 
@@ -103,19 +107,22 @@ module.exports = (router) => {
             }
             channel.name = channelName;
 
-            const result = await cloudinary.v2.uploader
-                .upload("uploads/channels/" + req.file.originalname, {
-                    folder: 'chatterbox/channelIcons/',
-                    resource_type: 'image',
-                    public_id: channelId
-                });
+            let result = null
+            if (req.file)
+                result = await cloudinary.v2.uploader
+                    .upload("uploads/channels/" + req.file.originalname, {
+                        folder: 'chatterbox/channelIcons/',
+                        resource_type: 'image',
+                        public_id: channelId
+                    });
 
-            const iconURL = result.secure_url;
+            const iconURL = result !== null ? result.secure_url : result;
             channel.iconURL = iconURL;
 
-            fs.rm("uploads/channels/" + req.file.originalname, (err) => {
-                if (err) throw err;
-            });
+            if (req.file)
+                fs.rm("uploads/channels/" + req.file.originalname, (err) => {
+                    if (err) throw err;
+                });
 
             const user = await User.findById(userId);
 

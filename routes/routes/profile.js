@@ -28,7 +28,7 @@ module.exports = (router) => {
             const decoded = req.decoded;
             const userId = decoded.uid;
 
-            let result = "";
+            let result = null;
             if (req.file)
                 result = await cloudinary.v2.uploader
                     .upload("uploads/users/" + req.file.originalname, {
@@ -36,10 +36,10 @@ module.exports = (router) => {
                         resource_type: 'image',
                         public_id: userId
                     });
-            const avatarURL = result === "" ? result.secure_url : "";
+            const avatarURL = result !== null ? result.secure_url : result;
 
             if (req.file)
-                fs.rm("uploads/" + req.file.originalname, (err) => {
+                fs.rm("uploads/users/" + req.file.originalname, (err) => {
                     if (err) throw err;
                 });
 
@@ -54,17 +54,6 @@ module.exports = (router) => {
             if (isUsernameAvailable.length > 0 && updateUsername !== prevUser.username) return res.send({ error: types.ErrorTypes.ALREADY_EXISTS });
 
             await User.findOneAndUpdate({ _id: userId }, user);
-            const messages = await Message.find();
-            const userMessages = messages.filter(
-                (userOb) => userOb.user.username === prevUser.username,
-            );
-            userMessages.forEach(async (userMessage) => {
-                await Message.findOneAndUpdate(userMessage, {
-                    $set: {
-                        user: user,
-                    },
-                });
-            });
             const updatedUser = await User.findOne({ _id: userId });
             const user2send = {
                 _id: updatedUser._id,

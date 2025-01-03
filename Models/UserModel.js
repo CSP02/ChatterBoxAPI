@@ -19,7 +19,7 @@ const userSchema = new mongoose.Schema({
     color: {
         type: String,
         required: true,
-        default: "#ff0000"
+        default: "#ffffff"
     },
     channels: {
         type: [mongoose.Types.ObjectId]

@@ -61,11 +61,6 @@ module.exports = (router) => {
             if (datas.length > 0) {
                 const urlFetchPromises = datas.map(async (data) => {
                     let response;
-                    // try {
-                    // } catch (e) {
-                    //     return;  // Skip invalid URLs
-                    // }
-
                     try {
                         response = await fetchWithTimeout(data, { mode: "cors", method: "GET" });
                         if (!response.ok) return;
@@ -128,15 +123,9 @@ module.exports = (router) => {
             let maxMessages = false;
 
             const userInDb = await User.findById(userId);
-            // const user = {
-            //     username: userInDb.username,
-            //     color: userInDb.color,
-            //     avatarURL: userInDb.avatarURL
-            // };
 
             if (channel.members.filter(ob => ob.toString() === userInDb._id.toString()).length <= 0) return res.status(401).send({ error: types.ErrorTypes.NOT_FOUND });
             const allMessagesIndb = await Message.find({ channel: channelId });
-            // const allMessagesFiltered = allMessagesIndb.filter(ob => channel._id.toString() === ob.channel._id.toString());
             if (chunkSize >= allMessagesIndb.length) maxMessages = true;
             const processMessages = async () => {
                 const messagePromises = allMessagesIndb.map(async (message, index) => {
