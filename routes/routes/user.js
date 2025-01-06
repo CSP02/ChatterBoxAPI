@@ -1,103 +1,90 @@
 const { Types } = require("../types.js");
-const { check, validationResult } = require('express-validator');
+const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 const User = require("../../Models/UserModel.js");
 const Channel = require("../../Models/ChannelModel.js");
 const isAuthorized = require("../middlewares/Authentication.js");
-const cloudinary = require('cloudinary');
-const fs = require("fs");
-const multer = require("multer");
+const { upload, uploadToCloudinary } = require("../middlewares/UploadImage.js");
 const types = new Types();
+const logger = require("../../config/logger.js");
 
 const saltRounds = 10;
 
 module.exports = (router) => {
-    const storage = multer.diskStorage({
-        destination: (req, file, cb) => {
-            cb(null, 'uploads/users/');
-        },
-        filename: (req, file, cb) => {
-            if (file)
-                cb(null, file.originalname);
-        },
-    });
-
-    const upload = multer({ storage: storage, limits: { fileSize: 1000000 } });
-
     router.post("/signup", upload.single("avatarURL"), async (req, res) => {
         const username = req.body.username.replaceAll(/\s+/g, "_").slice(0, 31);
         const color = req.body.color.toString();
+        if (!username || username.length < 3 || username.length > 31 || !/^[a-zA-Z0-9_]+$/.test(username)) {
+            return res.status(400).send({ error: types.ErrorTypes.INVALID_REQUEST });
+        }
+        const existingUser = await User.findOne({ username });
+        if (existingUser) {
+            return res.status(400).send({ error: types.ErrorTypes.UNAME_NOT_AVAILABLE });
+        }
 
-        bcrypt.hash(req.body.password, saltRounds, async (err, hashedPassword) => {
+        const password = req.body.password;
+        if (!password || password.length < 8) {
+            return res.status(400).send({ error: 'Password must be at least 8 characters long' });
+        }
+
+        if (!/^#[0-9A-Fa-f]{6}$/.test(color)) {
+            return res.status(400).send({ error: 'Invalid color format' });
+        }
+
+        bcrypt.hash(password, saltRounds, async (err, hashedPassword) => {
             try {
                 const password = hashedPassword;
-                const userDb = await User.findOne({ username });
-
                 const user = new User({
                     username: username,
                     password: password,
                     color: color.slice(0, 7),
                 });
 
-                let result = null;
-                if (req.file)
-                    result = await cloudinary.v2.uploader
-                        .upload("uploads/users/" + req.file.originalname, {
-                            folder: 'chatterbox/pfps/',
-                            resource_type: 'image',
-                            public_id: user._id
-                        });
-                const avatarURL = result !== null ? result.secure_url : result;
-                if (req.file)
-                    fs.rm("uploads/users/" + req.file.originalname, (err) => {
-                        if (err) throw err;
-                    });
-                user.avatarURL = avatarURL;
-                if (userDb && userDb.length > 0)
-                    return res.status(400).send({ error: types.ErrorTypes.UNAME_NOT_AVAILABLE });
-
+                user.avatarURL = uploadToCloudinary(req, user._id, 'pfps');
                 const userData = await user.save();
                 return res.status(200).send({ user: userData });
-            } catch (error) {
-                console.log(error);
+            } catch (e) {
+                logger.error(e);
             }
         });
     });
 
     router.get("/get_users", isAuthorized, async (req, res) => {
-        try{
-            if (!req.query) return res.send({ error: types.ErrorTypes.INVALID_REQUEST });
+        try {
             const cid = req.query.cid;
-    
-            const channel = await Channel.findById(cid);
-            const members = channel.members;
-            const mem2push = [];
-            for (let i = 0; i < members.length; i++) {
-                const member = await User.findById(members[i]);
-                const mem = {
-                    username: member.username,
-                    avatarURL: member.avatarURL,
-                    status: member.status,
-                    color: member.color
-                };
-                mem2push.push(mem);
+            if (!cid || !mongoose.Types.ObjectId.isValid(cid)) {
+                return res.status(400).send({ error: types.ErrorTypes.INVALID_REQUEST });
             }
-    
-            return res.status(200).send({ members: mem2push });
-        }catch(e){
-            return res.status(518).send({error: types.ErrorTypes.UNKNOWN_ERROR});
+
+            const channel = await Channel.findById(cid);
+            if (!channel) {
+                return res.status(404).send({ error: 'Channel not found' });
+            }
+
+            const members = await User.find({ _id: { $in: channel.members } }, 'username avatarURL status color');
+
+            return res.status(200).send({ members: members });
+        } catch (e) {
+            logger.error(e);
+            return res.status(518).send({ error: types.ErrorTypes.UNKNOWN_ERROR });
         }
     })
 
     router.get("/search_user", isAuthorized, async (req, res) => {
         const username = req.query.username;
-        try {
-            const user = await User.findOne({ username });
+        if (!username || typeof username !== 'string' || username.trim().length === 0) {
+            return res.status(400).send({ error: types.ErrorTypes.INVALID_REQUEST });
+        }
 
-            if (user) return res.send({ username: user.username, avatarURL: user.avatarURL });
-            res.status(404).send({ error: types.ErrorTypes.NOT_FOUND });
+        try {
+            const user = await User.findOne({ username: { $regex: `^${username}$`, $options: 'i' } });
+
+            if (!user)
+                return res.status(404).send({ error: types.ErrorTypes.NOT_FOUND });
+            res.send({ username: user.username, avatarURL: user.avatarURL });
         } catch (e) {
-            console.log(e);
+            logger.error(e);
+            res.status(500).send({ error: types.ErrorTypes.UNKNOWN_ERROR });
         }
     })
 }

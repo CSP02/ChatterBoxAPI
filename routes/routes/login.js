@@ -5,6 +5,7 @@ const { Types } = require("../types.js");
 const bcrypt = require("bcrypt");
 const User = require("../../Models/UserModel.js");
 const jwt = require("jsonwebtoken");
+const logger = require('../../config/logger.js');
 
 const types = new Types();
 
@@ -46,8 +47,9 @@ module.exports = (router) => {
             } else {
                 return res.status(400).send({ error: types.ErrorTypes.NOT_FOUND });
             }
-        } catch (error) {
-            console.log(error);
+        } catch (e) {
+            logger.error(e);
+            res.status(500).send({ error: types.ErrorTypes.UNKNOWN_ERROR });
         }
     });
 }

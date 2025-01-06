@@ -4,6 +4,9 @@ const Message = require("../../Models/MessageModel.js");
 const Channel = require("../../Models/ChannelModel.js");
 const cheerio = require("cheerio");
 const isAuthorized = require("../middlewares/Authentication.js");
+const mongoose = require("mongoose");
+const logger = require('../../config/logger.js');
+const { upload, uploadToCloudinary } = require("../middlewares/UploadFile.js");
 
 const types = new Types();
 
@@ -18,52 +21,67 @@ const fetchWithTimeout = (url, options, timeout = 1000) => {
 
 //post message to the database
 module.exports = (router) => {
-    router.post("/messages", isAuthorized, async (req, res) => {
+    router.post("/messages", isAuthorized, upload.single("file"), async (req, res) => {
         try {
             const decoded = req.decoded;
             const decodedUserID = decoded.uid;
 
-            const userInDb = await User.findById(decodedUserID);
-            const channelId = req.query.channel_id;
-            const channelInDb = await Channel.findById(channelId);
+            const [userInDb, channelInDb] = await Promise.all([
+                User.findById(decodedUserID),
+                Channel.findById(req.query.channel_id)
+            ]);
+
             if (!userInDb || !channelInDb) return res.status(404).send({ error: types.ErrorTypes.NOT_FOUND });
 
-            if (!channelInDb.members.some(member => member.toString() === decodedUserID.toString())) {
-                return res.status(403).send({ error: types.ErrorTypes.PERMISSIONS });
+            if (!channelInDb.members.includes(decodedUserID)) {
+                return res.status(403).send({ error: types.ErrorTypes.PERMISSIONS, message: "You are not a member of this channel." });
             }
 
-            if (!req.body.content || typeof req.body.content !== 'string' || req.body.content.trim() === "") {
+            if ((!req.body.content || typeof req.body.content !== 'string' || req.body.content.trim() === "") && !req.file) {
                 return res.status(400).send({ error: types.ErrorTypes.NULL_CONTENT });
             }
 
             const messageContent = req.body.content.slice(0, 500).trim();
             const repliedTo = req.body.repliedTo;
 
-            const user = userInDb._id;
-            const channel = channelInDb._id;
-
-            let message;
-            message = new Message({
-                user,
-                content: messageContent,
-                timestamp: Date.now(),
-                channel
-            });
-            if (repliedTo) {
-                const repliedToMessage = await Message.findOne({ _id: repliedTo._id });
-                if (!repliedToMessage) console.log("unknown message")
-                message.repliedTo = repliedToMessage ? repliedToMessage._id : undefined;
+            if (repliedTo && !mongoose.Types.ObjectId.isValid(repliedTo)) {
+                return res.status(400).send({ error: types.ErrorTypes.INVALID_REQUEST });
             }
 
-            const datas = messageContent.split(/\s+/g).filter(messCon => messCon.startsWith("https://"));
+            const message = new Message({
+                user: userInDb._id,
+                content: messageContent,
+                timestamp: Date.now(),
+                channel: channelInDb._id
+            });
+
+            if (repliedTo) {
+                const repliedToMessage = await Message.findById(repliedTo);
+                if (!repliedToMessage) {
+                    return res.status(404).send({ error: types.ErrorTypes.NOT_FOUND, message: "Message to reply to not found." });
+                }
+                message.repliedTo = repliedToMessage;
+            }
+
             const components = [];
+            if (req.file) {
+                const component = {
+                    type: req.file.mimetype === "text/plain" ? types.ComponentTypes.FILE : types.ComponentTypes.IMAGE,
+                    title: req.file.originalname,
+                    description: "file",
+                }
+                component.url = await uploadToCloudinary(req);
+                components.push(component);
+            }
+            const datas = messageContent.split(/\s+/g).filter(messCon => messCon.startsWith("https://"));
 
             if (datas.length > 0) {
                 const urlFetchPromises = datas.map(async (data) => {
                     let response;
                     try {
-                        response = await fetchWithTimeout(data, { mode: "cors", method: "GET" });
+                        response = await fetchWithTimeout(data, { mode: "cors", method: "GET", timeout: 5000 });
                         if (!response.ok) return;
+
                         const contentType = response.headers.get("Content-Type");
                         if (contentType.includes("text/html")) {
                             const text = await response.text();
@@ -77,154 +95,170 @@ module.exports = (router) => {
                             };
                             components.push(embed);
                         } else if (contentType.includes("image")) {
-                            if (contentType.includes("gif")) {
-                                const embed = {
-                                    type: types.ComponentTypes.GIF,
-                                    imageURL: data
-                                };
-                                components.push(embed);
-                            } else {
-                                const embed = {
-                                    type: types.ComponentTypes.IMAGE,
-                                    imageURL: data
-                                };
-                                components.push(embed);
-                            }
+                            const embed = {
+                                type: contentType.includes("gif") ? types.ComponentTypes.GIF : types.ComponentTypes.IMAGE,
+                                imageURL: data
+                            };
+                            components.push(embed);
                         }
-
-                        message.components = components;
                     } catch (e) {
-                        console.error("Error fetching URL:", e);
+                        logger.error(e);
                     }
                 });
 
                 await Promise.all(urlFetchPromises);
             }
 
+            message.components = components.length > 0 ? components : [];
             await message.save();
-            return res.status(200).send({ messageId: message._id });
+            return res.status(200).send({ messageId: message._id, components: message.components, repliedTo: message.repliedTo });
 
         } catch (e) {
-            console.error(e);
+            logger.error(e);
+            return res.status(500).send({ error: types.ErrorTypes.UNKNOWN_ERROR });
         }
     });
 
     router.get("/messages", isAuthorized, async (req, res) => {
-        if (!req.query) return res.send({ error: types.ErrorTypes.INVALID_REQUEST });
-
         try {
             const decoded = req.decoded;
-
             const userId = decoded.uid;
             const channelId = req.query.channel_id;
-            const chunkSize = req.query.chunk;
+            const chunkSize = parseInt(req.query.chunk) || 16;
+            const page = parseInt(req.query.page) || 1;
+
             const channel = await Channel.findById(channelId);
-
-            let maxMessages = false;
-
             const userInDb = await User.findById(userId);
+            const messLen = (await Message.find({ channel: channelId })).length;
 
-            if (channel.members.filter(ob => ob.toString() === userInDb._id.toString()).length <= 0) return res.status(401).send({ error: types.ErrorTypes.NOT_FOUND });
-            const allMessagesIndb = await Message.find({ channel: channelId });
-            if (chunkSize >= allMessagesIndb.length) maxMessages = true;
-            const processMessages = async () => {
-                const messagePromises = allMessagesIndb.map(async (message, index) => {
-                    const _id = message.user;
-                    const messageAuthor = await User.findOne({ _id });
+            if (!channel || !userInDb) {
+                return res.status(404).send({ error: types.ErrorTypes.NOT_FOUND });
+            }
 
-                    const userP = {
-                        username: messageAuthor.username,
-                        avatarURL: messageAuthor.avatarURL,
-                        color: messageAuthor.color
-                    };
-                    const messageToPush = {
+            if (!channel.members.some(member => member.toString() === userId)) {
+                return res.status(403).send({ error: types.ErrorTypes.PERMISSIONS });
+            }
+
+            const messagesQuery = Message.find({ channel: channelId })
+                .sort({ timestamp: -1 })
+                .skip((messLen - page * chunkSize) < 0 ? 0 : (messLen - page * chunkSize))
+                .limit(page * chunkSize)
+                .sort({ timestamp: 1 });
+
+            const messages = await messagesQuery.exec();
+            const processedMessages = await Promise.all(
+                messages.map(async (message) => {
+                    const messageAuthor = await User.findById(message.user);
+                    const messageData = {
                         _id: message._id,
-                        user: userP,
+                        user: {
+                            username: messageAuthor.username,
+                            avatarURL: messageAuthor.avatarURL,
+                            color: messageAuthor.color,
+                        },
                         content: message.content,
                         components: message.components,
                         timestamp: message.timestamp,
-                        edited: message.edited
+                        edited: message.edited,
                     };
+
                     if (message.repliedTo) {
-                        const replied_id = message.repliedTo;
-                        const replyMsg = await Message.findOne({ _id: replied_id });
-                        if (replyMsg === null) {
-                            messageToPush.repliedTo = {
-                                _id: replied_id,
+                        const repliedMessage = await Message.findById(message.repliedTo);
+                        if (repliedMessage) {
+                            const replyAuthor = await User.findById(repliedMessage.user);
+                            messageData.repliedTo = {
+                                _id: repliedMessage._id,
+                                username: replyAuthor.username,
+                                color: replyAuthor.color,
+                                avatarURL: replyAuthor.avatarURL,
+                                content: `${repliedMessage.content.slice(0, 32)}...`,
+                            };
+                        } else {
+                            messageData.repliedTo = {
+                                _id: message.repliedTo,
                                 username: null,
                                 color: null,
                                 avatarURL: null,
                                 content: "This message was deleted!",
                             };
-                        } else {
-                            const authorId = replyMsg.user;
-                            const userDb = await User.findOne({ _id: authorId });
-
-                            messageToPush.repliedTo = {
-                                _id: replied_id,
-                                username: userDb.username,
-                                color: userDb.color,
-                                avatarURL: userDb.avatarURL,
-                                content: replyMsg.content.slice(0, 32) + "..."
-                            };
                         }
                     }
-                    return messageToPush;
-                });
 
-                try {
-                    const allMessages = await Promise.all(messagePromises);
-                    const messagesToPush = allMessages.slice(allMessages.length - chunkSize < 0 ? 0 : allMessages.length - chunkSize, allMessages.length);
-                    if (allMessages.length <= 15) {
-                        return res.send({ messages: allMessages, fetched_all_messages: maxMessages });
-                    } else {
-                        return res.send({ messages: messagesToPush, fetched_all_messages: maxMessages });
-                    }
-                } catch (error) {
-                    console.log(error);
-                    return res.status(418).send({ error: types.ErrorTypes.UNKNOWN_ERROR });
-                }
-            };
-            processMessages();
-        } catch (e) {
-            console.log(e)
+                    return messageData;
+                })
+            );
+
+            const totalMessages = await Message.countDocuments({ channel: channelId });
+            const hasMore = (page * chunkSize) < totalMessages;
+
+            return res.send({
+                messages: processedMessages,
+                hasMore,
+            });
+        } catch (error) {
+            logger.error(error);
+            return res.status(500).send({ error: types.ErrorTypes.UNKNOWN_ERROR });
         }
-    })
+    });
 
     router.delete("/delete_msg", isAuthorized, async (req, res) => {
         try {
             const messageId = req.query.id;
             const uid = req.decoded.uid;
 
-            const message = await Message.findOne({ _id: messageId });
+            if (!messageId) {
+                return res.status(400).send({ error: types.ErrorTypes.INVALID_REQUEST, message: "Message ID is required." });
+            }
+
+            const message = await Message.findById(messageId);
+            if (!message) {
+                return res.status(404).send({ error: types.ErrorTypes.NOT_FOUND, message: "Message not found." });
+            }
+
             if (message.user.toString() === uid.toString()) {
-                await Message.findOneAndDelete({ _id: messageId });
-                res.status(200).send({ success: types.SuccessTypes.SUCCESS });
+                await Message.findByIdAndDelete(messageId);
+                return res.status(200).send({ success: types.SuccessTypes.SUCCESS });
+            } else {
+                return res.status(403).send({ error: types.ErrorTypes.PERMISSIONS, message: "You are not authorized to delete this message." });
             }
         } catch (e) {
-            console.log(e);
+            logger.error(e);
+            return res.status(500).send({ error: types.ErrorTypes.UNKNOWN_ERROR, message: e.message });
         }
-    })
+    });
+
 
     router.put("/edit_msg", isAuthorized, async (req, res) => {
+        const { content } = req.body;
+        const messageId = req.query.id;
+        const userId = req.decoded.uid;
+
         try {
-            const content = req.body.content;
-            const messageId = req.query.id;
-            const userId = req.decoded.uid;
-            const message = await Message.findOne({ _id: messageId });
+            if (!messageId || !content || typeof content !== 'string' || content.trim() === "" || content.trim().length > 500) {
+                return res.status(400).send({ error: types.ErrorTypes.INVALID_REQUEST, message: "Message ID and content are required." });
+            }
 
-            if (message.user.toString() !== userId.toString()) return res.status(401).send({ error: types.ErrorTypes.INVALID_CREDENTIALS });
+            const message = await Message.findById(messageId);
+            if (!message) {
+                return res.status(404).send({ error: types.ErrorTypes.NOT_FOUND, message: "Message not found." });
+            }
 
-            await Message.findOneAndUpdate({ _id: messageId }, {
+            if (message.user.toString() !== userId.toString()) {
+                return res.status(403).send({ error: types.ErrorTypes.PERMISSIONS, message: "You are not authorized to edit this message." });
+            }
+
+            await Message.findByIdAndUpdate(messageId, {
                 $set: {
                     edited: true,
                     content: content
                 }
             });
 
-            res.send({ success: types.SuccessTypes.SUCCESS });
+            return res.status(200).send({ success: types.SuccessTypes.SUCCESS });
         } catch (e) {
-            console.log(e)
+            logger.error(e);
+            return res.status(500).send({ error: types.ErrorTypes.UNKNOWN_ERROR, message: "An error occurred while editing the message." });
         }
-    })
+    });
+
 }

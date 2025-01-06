@@ -7,7 +7,8 @@ class Types {
             EMBED: 1,
             IMAGE: 2,
             VIDEO: 3,
-            GIF: 4
+            GIF: 4,
+            FILE: 5
         });
 
         this.ErrorTypes = Object.freeze({
@@ -23,7 +24,9 @@ class Types {
             UNKNOWN_ERROR: 10,
             CHANNEL_LIMIT: 11,
             ALREADY_EXISTS: 12,
-            INVALID_FILE: 13
+            INVALID_FILE: 13,
+            INVALID_CHANNEL: 14,
+            CHANNEL_LIMIT: 15,
         });
 
         this.SuccessTypes = Object.freeze({

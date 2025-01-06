@@ -3,6 +3,7 @@ const jwt = require("jsonwebtoken");
 const isAuthorized = require("../middlewares/Authentication.js");
 const { Types } = require("../types.js");
 const types = new Types;
+const logger = require('../../config/logger.js');
 
 module.exports = (router) => {
     router.get("/request_new_token", isAuthorized, async (req, res) => {
@@ -24,6 +25,7 @@ module.exports = (router) => {
     
             return res.send({ token: newToken, refreshToken: newRefreshToken });
         }catch(e){
+            logger.error(e);
             return res.status(518).send({error: types.ErrorTypes.UNKNOWN_ERROR});
         }
     })

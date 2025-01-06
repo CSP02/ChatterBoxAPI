@@ -2,61 +2,30 @@ const { Types } = require("../types.js");
 const User = require("../../Models/UserModel.js");
 const Channel = require("../../Models/ChannelModel.js");
 const isAuthorized = require("../middlewares/Authentication.js");
-const cloudinary = require('cloudinary');
-const fs = require("fs");
-const multer = require("multer");
+const getUser = require("../middlewares/GetUser.js");
+const { validateChannel, validateUser } = require("../middlewares/ValidateChannel.js");
+const { uploadToCloudinary, upload } = require("../middlewares/UploadImage.js");
 const types = new Types();
+const logger = require('../../config/logger.js');
+const mongoose = require('mongoose');
 
 module.exports = (router) => {
     router.get("/channels", isAuthorized, async (req, res) => {
         try {
-            const decoded = req.decoded;
-            const userId = decoded.uid;
-            const user = await User.findById(userId);
-            const userChannels = user.channels;
-
-            const channelsData = [];
-
-            Promise.all(userChannels.map(async (channelId) => {
-                const channel = await Channel.findById(channelId);
-                channelsData.push({
-                    iconURL: channel.iconURL,
-                    name: channel.name,
-                    _id: channel._id
-                });
-            })).then(() => {
-                return res.status(200).send({ channels: channelsData });
-            }).catch(error => {
-                console.error(error);
-                return res.status(500).send({ error: 'An error occurred' });
-            });
+            const user = await User.findById(req.decoded.uid);
+            const channelsData = await Channel.find({ _id: { $in: user.channels } }, 'iconURL name _id');
+            res.send({ channels: channelsData });
         } catch (e) {
-            console.log(e);
+            logger.error(e);
+            res.status(500).send({ error: types.ErrorTypes.UNKNOWN_ERROR });
         }
     });
 
-
-    const storage = multer.diskStorage({
-        destination: (req, file, cb) => {
-            cb(null, 'uploads/channels/');
-        },
-        filename: (req, file, cb) => {
-            if (file)
-                cb(null, file.originalname);
-        },
-    });
-
-    const upload = multer({ storage: storage, limits: { fileSize: 1000000 } });
-
-    router.post("/channels", isAuthorized, upload.single("channelIcon"), async (req, res) => {
+    router.post("/channels", isAuthorized, getUser, validateChannel, upload.single("channelIcon"), async (req, res) => {
         try {
             const decoded = req.decoded;
             const userId = decoded.uid;
-
-            const groupMembers = [];
-            groupMembers.push(userId);
-
-            const channelName = req.body.channelName;
+            const groupMembers = [userId];
 
             const channel = new Channel({
                 name: channelName,
@@ -64,77 +33,53 @@ module.exports = (router) => {
                 members: groupMembers
             });
 
-            let result = null;
-            if (req.file)
-                result = await cloudinary.v2.uploader
-                    .upload("uploads/channels/" + req.file.originalname, {
-                        folder: 'chatterbox/channelIcons/',
-                        resource_type: 'image',
-                        public_id: channel._id
-                    });
-            const iconURL = result !== null ? result.secure_url : result;
-            channel.iconURL = iconURL;
-            if (req.file)
-                fs.rm("uploads/channels/" + req.file.originalname, (err) => {
-                    if (err) throw err;
-                });
+            channel.iconURL = await uploadToCloudinary(req, channel._id, 'channelIcons');
 
-            const user = await User.findById(userId);
-
-            if (user.channels.length >= 10) return res.send({ error: types.ErrorTypes.CHANNEL_LIMIT });
+            if (req.user.channels.length >= 10) return res.send({ error: types.ErrorTypes.CHANNEL_LIMIT });
             await channel.save();
-            await User.findOneAndUpdate({ _id: userId },
-                {
-                    $push: {
-                        channels: channel._id
-                    },
-                });
+            const user = await User.findOneAndUpdate(
+                { _id: userId, $expr: { $lt: [{ $size: "$channels" }, 10] } },
+                { $push: { channels: channel._id } },
+                { new: true }
+            );
+            if (!user) {
+                return res.status(400).send({ error: types.ErrorTypes.CHANNEL_LIMIT });
+            }
             return res.send({ channel: channel });
         } catch (e) {
-            console.log(e);
+            logger.error(e);
+            return res.status(500).send({ error: 'An unexpected error occurred' });
         }
     });
 
-    router.put("/channels", isAuthorized, upload.single("channelIcon"), async (req, res) => {
+    router.put("/channels", isAuthorized, validateChannel, upload.single("channelIcon"), async (req, res) => {
         try {
             const decoded = req.decoded;
             const userId = decoded.uid;
             const channelId = req.query.id;
-
             const channelName = req.body.channelName;
+
+            if (!channelId || !mongoose.Types.ObjectId.isValid(channelId)) {
+                return res.status(400).send({ error: types.ErrorTypes.INVALID_REQUEST });
+            }
+
             const channel = {
                 name: channelName
+            };
+            const channelToUpdate = await Channel.findById(channelId);
+            if (!channelToUpdate || channelToUpdate.author.toString() !== userId) {
+                return res.status(403).send({ error: types.ErrorTypes.PERMISSIONS });
             }
-            channel.name = channelName;
+            channel.iconURL = await uploadToCloudinary(req, channelId, 'channelIcons', channelToUpdate.iconURL);
 
-            let result = null
-            if (req.file)
-                result = await cloudinary.v2.uploader
-                    .upload("uploads/channels/" + req.file.originalname, {
-                        folder: 'chatterbox/channelIcons/',
-                        resource_type: 'image',
-                        public_id: channelId
-                    });
-
-            const iconURL = result !== null ? result.secure_url : result;
-            channel.iconURL = iconURL;
-
-            if (req.file)
-                fs.rm("uploads/channels/" + req.file.originalname, (err) => {
-                    if (err) throw err;
-                });
-
-            const user = await User.findById(userId);
-
-            if (user.channels.length >= 10) return res.send({ error: types.ErrorTypes.CHANNEL_LIMIT });
-            await Channel.findOneAndUpdate({ _id: channelId }, channel);
             return res.send({ channel: channel });
         } catch (e) {
-            console.log(e);
+            logger.error(e);
+            return res.status(500).send({ error: types.ErrorTypes.UNKNOWN_ERROR });
         }
     })
 
-    router.get("/add_user", isAuthorized, async (req, res) => {
+    router.get("/add_user", isAuthorized, validateUser, async (req, res) => {
         try {
             const decoded = req.decoded;
             const username = req.query.username;
@@ -143,7 +88,38 @@ module.exports = (router) => {
             const userId = decoded.uid;
             const user = await User.findOne({ username: username });
             const channel = await Channel.findById(channelId);
-            const membersInChannel = await channel.members.filter(member => member === user._id);
+            if (!user || !channel) {
+                return res.status(404).send({ error: types.ErrorTypes.NOT_FOUND });
+            }
+            const isMember = channel.members.some(member => member.toString() === user._id.toString());
+            if (isMember) {
+                return res.status(403).send({ error: types.ErrorTypes.ALREADY_EXISTS });
+            }
+
+            if (channel.author.toString() !== userId) {
+                return res.status(401).send({ error: types.ErrorTypes.PERMISSIONS });
+            }
+
+            const session = await mongoose.startSession();
+            session.startTransaction();
+            try {
+                await Channel.findOneAndUpdate(
+                    { _id: channelId },
+                    { $push: { members: user._id } },
+                    { session }
+                );
+                await User.findOneAndUpdate(
+                    { username },
+                    { $push: { channels: channelId } },
+                    { session }
+                );
+                await session.commitTransaction();
+            } catch (error) {
+                await session.abortTransaction();
+                throw error;
+            } finally {
+                session.endSession();
+            }
 
             const userToPush = {
                 _id: user._id,
@@ -152,23 +128,10 @@ module.exports = (router) => {
                 color: user.color
             };
 
-            if (JSON.stringify(channel.author._id) !== JSON.stringify(userId)) return res.status(401).send({ error: types.ErrorTypes.PERMISSIONS });
-            if (membersInChannel.length !== 0) return res.status(403).send({ error: types.ErrorTypes.ALREADY_EXISTS });
-
-            await Channel.findOneAndUpdate({ _id: channelId }, {
-                $push: {
-                    members: user._id
-                }
-            });
-
-            await User.findOneAndUpdate({ username: username }, {
-                $push: {
-                    channels: channelId
-                }
-            })
-            return res.send({ invited: userToPush })
-        } catch (err) {
-            console.log(err)
+            return res.send({ invited: userToPush });
+        } catch (e) {
+            logger.error(e);
+            return res.status(500).send({ error: types.ErrorTypes.UNKNOWN_ERROR });
         }
     })
 }
