@@ -6,6 +6,7 @@ const cheerio = require("cheerio");
 const isAuthorized = require("../middlewares/Authentication.js");
 const mongoose = require("mongoose");
 const logger = require('../../config/logger.js');
+const cloudinary = require('cloudinary');
 const { upload, uploadToCloudinary } = require("../middlewares/UploadFile.js");
 
 const types = new Types();
@@ -65,12 +66,16 @@ module.exports = (router) => {
 
             const components = [];
             if (req.file) {
+                console.log(req.file);
                 const component = {
                     type: req.file.mimetype === "text/plain" ? types.ComponentTypes.FILE : types.ComponentTypes.IMAGE,
-                    title: req.file.originalname,
+                    title: (req.body.custom_name && req.body.custom_name !== null) ? req.body.custom_name : req.file.originalname,
                     description: "file",
+                    publicId: req.file.filename
                 }
-                component.url = await uploadToCloudinary(req);
+                const [url, rType] = await uploadToCloudinary(req);
+                component.url = url;
+                component.resourceType = rType;
                 components.push(component);
             }
             const datas = messageContent.split(/\s+/g).filter(messCon => messCon.startsWith("https://"));
@@ -216,6 +221,12 @@ module.exports = (router) => {
             }
 
             if (message.user.toString() === uid.toString()) {
+                const fileComponents = message.components.filter(component => component.type === types.ComponentTypes.FILE);
+                fileComponents.forEach(async component => {
+                    const publicId = component.publicId;
+                    console.log(component)
+                    await cloudinary.v2.api.delete_resources(["chatterbox/files/" + publicId], { type: 'upload', resource_type: component.resourceType.toString() }).then(e => console.log(e)).catch(e => console.log(e));
+                });
                 await Message.findByIdAndDelete(messageId);
                 return res.status(200).send({ success: types.SuccessTypes.SUCCESS });
             } else {

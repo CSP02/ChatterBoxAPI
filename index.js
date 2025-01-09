@@ -32,8 +32,9 @@ database.once("connected", () => {
  * ? Initialising express and configuring port
  */
 const apiServer = express();
-apiServer.use(express.json())
-apiServer.use(cors())
+apiServer.use(express.json());
+apiServer.use(cors());
+
 apiServer.use("/api", router)
 apiServer.use(morgan('combined', {
     stream: {
