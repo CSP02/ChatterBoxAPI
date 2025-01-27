@@ -3,16 +3,18 @@
  */
 const express = require("express");
 const router = express.Router();
-const fs = require("fs");
 const rateLimit = require('express-rate-limit');
 const sanitizer = require('express-sanitizer');
 const logger = require('../config/logger');
 
-const routes = fs.readdirSync("./routes/routes").filter(file => file.endsWith("js"));
-
-routes.forEach(route => {
-    require(`./routes/${route}`)(router);
-})
+require("./routes/channel")(router);
+require("./routes/login")(router);
+require("./routes/logout")(router);
+require("./routes/message")(router);
+require("./routes/profile")(router);
+require("./routes/token")(router);
+require("./routes/typing")(router);
+require("./routes/user")(router);
 
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes

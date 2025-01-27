@@ -22,7 +22,8 @@ const userSchema = new mongoose.Schema({
         default: "#ffffff"
     },
     channels: {
-        type: [mongoose.Types.ObjectId]
+        type: [mongoose.Schema.Types.ObjectId],
+        ref: "Channel"
     },
     status: {
         type: Number,

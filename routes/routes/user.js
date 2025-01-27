@@ -52,6 +52,7 @@ module.exports = (router) => {
     router.get("/get_users", isAuthorized, async (req, res) => {
         try {
             const cid = req.query.cid;
+            const uid = req.decoded.uid;
             if (!cid || !mongoose.Types.ObjectId.isValid(cid)) {
                 return res.status(400).send({ error: types.ErrorTypes.INVALID_REQUEST });
             }
@@ -60,8 +61,10 @@ module.exports = (router) => {
             if (!channel) {
                 return res.status(404).send({ error: 'Channel not found' });
             }
+            
+            if (!channel.members.some(user => user.toString() === uid)) return res.status(403).send({ error: types.ErrorTypes.PERMISSIONS });
 
-            const members = await User.find({ _id: { $in: channel.members } }, 'username avatarURL status color');
+            const members = await User.find({ _id: { $in: channel.members } }, 'username avatarURL status color -_id');
 
             return res.status(200).send({ members: members });
         } catch (e) {

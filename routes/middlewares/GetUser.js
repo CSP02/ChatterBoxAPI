@@ -15,6 +15,7 @@ const getUser = async (req, res, next) => {
             username: user.username,
             avatarURL: user.avatarURL,
             color: user.color,
+            channels: user.channels
         };
 
         next();

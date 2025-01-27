@@ -5,8 +5,9 @@ const mongoose = require('mongoose');
  */
 const messageSchema = new mongoose.Schema({
     user: {
-        type: mongoose.Types.ObjectId,
-        require: true
+        type: mongoose.Schema.Types.ObjectId,
+        require: true,
+        ref: "User"
     },
     content: {
         require: true,
@@ -19,11 +20,13 @@ const messageSchema = new mongoose.Schema({
         type: Date
     },
     channel: {
-        type: mongoose.Types.ObjectId,
-        require: true
+        type: mongoose.Schema.Types.ObjectId,
+        require: true,
+        ref: "Channel"
     },
     repliedTo: {
-        type: mongoose.Types.ObjectId
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Message"
     },
     edited: {
         type: Boolean,

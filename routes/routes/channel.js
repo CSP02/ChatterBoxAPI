@@ -21,19 +21,21 @@ module.exports = (router) => {
         }
     });
 
-    router.post("/channels", isAuthorized, getUser, validateChannel, upload.single("channelIcon"), async (req, res) => {
+    router.post("/channels", isAuthorized, getUser, upload.single("channelIcon"), async (req, res) => {
         try {
             const decoded = req.decoded;
             const userId = decoded.uid;
             const groupMembers = [userId];
 
+            if (!req.body.channelName || req.body.channelName === "" || req.body.channelName === null) return res.status(403).send({ error: types.ErrorTypes.INVALID_CHANNEL });
+
             const channel = new Channel({
-                name: channelName,
+                name: req.body.channelName,
                 author: userId,
                 members: groupMembers
             });
-
-            channel.iconURL = await uploadToCloudinary(req, channel._id, 'channelIcons');
+            if (req.body.channelIcon)
+                channel.iconURL = await uploadToCloudinary(req, channel._id, 'channelIcons');
 
             if (req.user.channels.length >= 10) return res.send({ error: types.ErrorTypes.CHANNEL_LIMIT });
             await channel.save();
@@ -52,7 +54,7 @@ module.exports = (router) => {
         }
     });
 
-    router.put("/channels", isAuthorized, validateChannel, upload.single("channelIcon"), async (req, res) => {
+    router.put("/channels", isAuthorized, upload.single("channelIcon"), async (req, res) => {
         try {
             const decoded = req.decoded;
             const userId = decoded.uid;
@@ -71,6 +73,12 @@ module.exports = (router) => {
                 return res.status(403).send({ error: types.ErrorTypes.PERMISSIONS });
             }
             channel.iconURL = await uploadToCloudinary(req, channelId, 'channelIcons', channelToUpdate.iconURL);
+            await Channel.findOneAndUpdate({ _id: channelId }, {
+                $set: {
+                    name: channelName,
+                    iconURL: channel.iconURL
+                }
+            });
 
             return res.send({ channel: channel });
         } catch (e) {

@@ -13,13 +13,15 @@ const channelSchema = new mongoose.Schema({
         required: false
     },
     author: {
-        type: mongoose.Types.ObjectId,
-        required: true
+        type: mongoose.Schema.Types.ObjectId,
+        required: true,
+        ref: "User"
     },
     members: {
-        type: [mongoose.Types.ObjectId],
+        type: [mongoose.Schema.Types.ObjectId],
         required: true,
-        default: [this.author]
+        default: [this.author],
+        ref: "User"
     }
 })
 

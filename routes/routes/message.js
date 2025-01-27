@@ -56,17 +56,18 @@ module.exports = (router) => {
                 channel: channelInDb._id
             });
 
+
             if (repliedTo) {
                 const repliedToMessage = await Message.findById(repliedTo);
                 if (!repliedToMessage) {
                     return res.status(404).send({ error: types.ErrorTypes.NOT_FOUND, message: "Message to reply to not found." });
                 }
+                if (repliedToMessage.channel !== req.query.channel_id) return res.status(403).send({ error: types.ErrorTypes.PERMISSIONS });
                 message.repliedTo = repliedToMessage;
             }
 
             const components = [];
             if (req.file) {
-                console.log(req.file);
                 const component = {
                     type: req.file.mimetype === "text/plain" ? types.ComponentTypes.FILE : types.ComponentTypes.IMAGE,
                     title: (req.body.custom_name && req.body.custom_name !== null) ? req.body.custom_name : req.file.originalname,
@@ -134,8 +135,7 @@ module.exports = (router) => {
 
             const channel = await Channel.findById(channelId);
             const userInDb = await User.findById(userId);
-            const messLen = (await Message.find({ channel: channelId })).length;
-
+            const messLen = (await Message.countDocuments({ channel: channelId }));
             if (!channel || !userInDb) {
                 return res.status(404).send({ error: types.ErrorTypes.NOT_FOUND });
             }
@@ -143,61 +143,26 @@ module.exports = (router) => {
             if (!channel.members.some(member => member.toString() === userId)) {
                 return res.status(403).send({ error: types.ErrorTypes.PERMISSIONS });
             }
-
+            
             const messagesQuery = Message.find({ channel: channelId })
                 .sort({ timestamp: -1 })
                 .skip((messLen - page * chunkSize) < 0 ? 0 : (messLen - page * chunkSize))
                 .limit(page * chunkSize)
-                .sort({ timestamp: 1 });
+                .sort({ timestamp: 1 })
+                .populate("user", "username color avatarURL -_id")
+                .populate({
+                    path: "repliedTo",
+                    select: "content",
+                    populate: {
+                        path: "user",
+                        select: "username color avatarURL -_id"
+                    }
+                });
 
             const messages = await messagesQuery.exec();
-            const processedMessages = await Promise.all(
-                messages.map(async (message) => {
-                    const messageAuthor = await User.findById(message.user);
-                    const messageData = {
-                        _id: message._id,
-                        user: {
-                            username: messageAuthor.username,
-                            avatarURL: messageAuthor.avatarURL,
-                            color: messageAuthor.color,
-                        },
-                        content: message.content,
-                        components: message.components,
-                        timestamp: message.timestamp,
-                        edited: message.edited,
-                    };
-
-                    if (message.repliedTo) {
-                        const repliedMessage = await Message.findById(message.repliedTo);
-                        if (repliedMessage) {
-                            const replyAuthor = await User.findById(repliedMessage.user);
-                            messageData.repliedTo = {
-                                _id: repliedMessage._id,
-                                username: replyAuthor.username,
-                                color: replyAuthor.color,
-                                avatarURL: replyAuthor.avatarURL,
-                                content: `${repliedMessage.content.slice(0, 32)}...`,
-                            };
-                        } else {
-                            messageData.repliedTo = {
-                                _id: message.repliedTo,
-                                username: null,
-                                color: null,
-                                avatarURL: null,
-                                content: "This message was deleted!",
-                            };
-                        }
-                    }
-
-                    return messageData;
-                })
-            );
-
-            const totalMessages = await Message.countDocuments({ channel: channelId });
-            const hasMore = (page * chunkSize) < totalMessages;
-
+            const hasMore = (page * chunkSize) < messLen;
             return res.send({
-                messages: processedMessages,
+                messages: messages,
                 hasMore,
             });
         } catch (error) {
