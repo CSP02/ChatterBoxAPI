@@ -49,11 +49,11 @@ apiServer.get("/api/", async (req, res) => {
     res.json({message: "server is working"});
     console.log("server is working");
 })
-apiServer.use(morgan('combined', {
-    stream: {
-        write: (message) => logger.info(message.trim())
-    }
-}));
+// apiServer.use(morgan('combined', {
+//     stream: {
+//         write: (message) => logger.info(message.trim())
+//     }
+// }));
 
 apiServer.listen("3001", () => {
     logger.info("Listening to 3001")
