@@ -1,6 +1,6 @@
 const { Types } = require("../types.js");
 const User = require("../../Models/UserModel.js");
-const isAuthorized = require("../middlewares/Authentication.js");
+const {isAuthorized} = require("../middlewares/Authentication.js");
 const types = new Types();
 const logger = require('../../config/logger.js');
 

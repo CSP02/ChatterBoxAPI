@@ -1,5 +1,5 @@
 const Channel = require("../../Models/ChannelModel.js");
-const isAuthorized = require("../middlewares/Authentication.js");
+const {isAuthorized} = require("../middlewares/Authentication.js");
 const logger = require('../../config/logger.js');
 
 module.exports = (router) => {

@@ -3,7 +3,7 @@ const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 const User = require("../../Models/UserModel.js");
 const Channel = require("../../Models/ChannelModel.js");
-const isAuthorized = require("../middlewares/Authentication.js");
+const {isAuthorized} = require("../middlewares/Authentication.js");
 const { upload, uploadToCloudinary } = require("../middlewares/UploadImage.js");
 const types = new Types();
 const logger = require("../../config/logger.js");
@@ -40,7 +40,7 @@ module.exports = (router) => {
                     color: color.slice(0, 7),
                 });
 
-                user.avatarURL = uploadToCloudinary(req, user._id, 'pfps');
+                user.avatarURL = await uploadToCloudinary(req, user._id, 'pfps');
                 const userData = await user.save();
                 return res.status(200).send({ user: userData });
             } catch (e) {

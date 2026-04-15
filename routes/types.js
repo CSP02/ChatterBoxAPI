@@ -25,7 +25,8 @@ class Types {
             CHANNEL_LIMIT: 11,
             ALREADY_EXISTS: 12,
             INVALID_FILE: 13,
-            INVALID_CHANNEL: 14
+            INVALID_CHANNEL: 14,
+            MESSAGE_LEN_LIMIT: 15
         });
 
         this.SuccessTypes = Object.freeze({

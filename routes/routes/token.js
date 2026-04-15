@@ -1,6 +1,6 @@
 const User = require("../../Models/UserModel.js");
 const jwt = require("jsonwebtoken");
-const isAuthorized = require("../middlewares/Authentication.js");
+const {isAuthorized} = require("../middlewares/Authentication.js");
 const { Types } = require("../types.js");
 const types = new Types;
 const logger = require('../../config/logger.js');

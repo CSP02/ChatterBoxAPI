@@ -22,6 +22,10 @@ const channelSchema = new mongoose.Schema({
         required: true,
         default: [this.author],
         ref: "User"
+    },
+    public: {
+        type: Boolean,
+        default: false
     }
 })
 

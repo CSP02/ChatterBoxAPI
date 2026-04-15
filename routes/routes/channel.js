@@ -1,19 +1,20 @@
 const { Types } = require("../types.js");
 const User = require("../../Models/UserModel.js");
 const Channel = require("../../Models/ChannelModel.js");
-const isAuthorized = require("../middlewares/Authentication.js");
+const { isAuthorized, isInviteAuthorized } = require("../middlewares/Authentication.js");
 const getUser = require("../middlewares/GetUser.js");
 const { validateChannel, validateUser } = require("../middlewares/ValidateChannel.js");
 const { uploadToCloudinary, upload } = require("../middlewares/UploadImage.js");
 const types = new Types();
 const logger = require('../../config/logger.js');
 const mongoose = require('mongoose');
+const jwt = require("jsonwebtoken");
 
 module.exports = (router) => {
     router.get("/channels", isAuthorized, async (req, res) => {
         try {
             const user = await User.findById(req.decoded.uid);
-            const channelsData = await Channel.find({ _id: { $in: user.channels } }, 'iconURL name _id');
+            const channelsData = await Channel.find({ _id: { $in: user.channels } }, 'iconURL name public _id');
             res.send({ channels: channelsData });
         } catch (e) {
             logger.error(e);
@@ -60,13 +61,15 @@ module.exports = (router) => {
             const userId = decoded.uid;
             const channelId = req.query.id;
             const channelName = req.body.channelName;
+            const public = req.body.public;
 
             if (!channelId || !mongoose.Types.ObjectId.isValid(channelId)) {
                 return res.status(400).send({ error: types.ErrorTypes.INVALID_REQUEST });
             }
 
             const channel = {
-                name: channelName
+                name: channelName,
+                public: public
             };
             const channelToUpdate = await Channel.findById(channelId);
             if (!channelToUpdate || channelToUpdate.author.toString() !== userId) {
@@ -76,7 +79,8 @@ module.exports = (router) => {
             await Channel.findOneAndUpdate({ _id: channelId }, {
                 $set: {
                     name: channelName,
-                    iconURL: channel.iconURL
+                    iconURL: channel.iconURL,
+                    public: public
                 }
             });
 
@@ -137,6 +141,82 @@ module.exports = (router) => {
             };
 
             return res.send({ invited: userToPush });
+        } catch (e) {
+            logger.error(e);
+            return res.status(500).send({ error: types.ErrorTypes.UNKNOWN_ERROR });
+        }
+    });
+
+    router.get("/search_channel", isAuthorized, isInviteAuthorized, async (req, res) => {
+        try {
+            const channelId = req.cdetails.cid;
+            const uid = req.decoded.uid;
+            const channelDb = await Channel.findById(channelId);
+            const channel = {
+                name: channelDb.name,
+                iconURL: channelDb.iconURL
+            }
+            if (channelDb.members.some(member => member._id.toString() === uid.toString())) channel.exists = true;
+            if (!channel) return res.status(400).send({ error: types.ErrorTypes.NOT_FOUND });
+
+            return res.send(channel);
+        } catch (e) {
+            logger.error(e);
+            return res.status(500).send({ error: types.ErrorTypes.UNKNOWN_ERROR });
+        }
+    })
+
+    router.get("/generate_invite", isAuthorized, async (req, res) => {
+        try {
+            const channelId = req.query.channelId;
+            const uid = req.decoded.uid;
+
+            const channel = await Channel.findById(channelId);
+            if (!channel.public) return res.status(403).send({ error: types.ErrorTypes.INVALID_REQUEST });
+            if (channel.author._id.toString() === uid.toString()) {
+                const token = jwt.sign(
+                    { cid: channelId },
+                    process.env.JWT_INVITE_SECRET,
+                    { expiresIn: "7d" }
+                );
+
+                return res.send({ inviteCode: token });
+            }
+        } catch (e) {
+            logger.error(e);
+            return res.status(500).send({ error: types.ErrorTypes.UNKNOWN_ERROR });
+        }
+    });
+
+    router.get("/join_channel", isAuthorized, isInviteAuthorized, async (req, res) => {
+        try {
+            const channelId = req.cdetails.cid;
+            const userId = req.decoded.uid;
+
+            const channelDb = await Channel.findById(channelId);
+            if (channelDb.members.some(member => member._id.toString() === userId)) return res.status(403).send({ error: types.ErrorTypes.ALREADY_EXISTS });
+            const session = await mongoose.startSession();
+            session.startTransaction();
+            try {
+                await Channel.findOneAndUpdate(
+                    { _id: channelId },
+                    { $push: { members: userId } },
+                    { session }
+                );
+                await User.findOneAndUpdate(
+                    { _id: userId },
+                    { $push: { channels: channelId } },
+                    { session }
+                );
+                await session.commitTransaction();
+
+                return res.send({ success: types.SuccessTypes.SUCCESS });
+            } catch (error) {
+                await session.abortTransaction();
+                throw error;
+            } finally {
+                session.endSession();
+            }
         } catch (e) {
             logger.error(e);
             return res.status(500).send({ error: types.ErrorTypes.UNKNOWN_ERROR });

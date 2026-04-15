@@ -16,4 +16,19 @@ const isAuthorized = async (req, res, next) => {
     return next();
 }
 
-module.exports = isAuthorized
+const isInviteAuthorized = async (req, res, next) => {
+    const [scheme, channelId] = await req.headers["x-channel-token"].split(" ")
+    if(!channelId) return res.status(401).send({error: types.ErrorTypes.NULL_CONTENT});
+
+    const token = channelId;
+    try {
+        req.cdetails = jwt.verify(token, process.env.JWT_INVITE_SECRET, {complete: true}).payload;
+    } catch (error) {
+        if(error.message === "jwt expired") return res.status(401).send({error: types.ErrorTypes.JWT_EXPIRE});
+        else return res.status(401).send({error: types.ErrorTypes.VERIFICATION_FAILED});
+    }
+
+    return next();
+}
+
+module.exports = {isAuthorized, isInviteAuthorized}
