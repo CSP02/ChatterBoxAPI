@@ -45,9 +45,6 @@ apiServer.use(cors(corsOptions));
 
 apiServer.use("/api", router)
 
-apiServer.get("/", async  (req, res) => {
-    res.send("Server is working");
-})
 apiServer.use(morgan('combined', {
     stream: {
         write: (message) => logger.info(message.trim())
