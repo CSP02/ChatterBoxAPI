@@ -9,8 +9,8 @@
 ## https://docs.npmjs.com/misc/faq#should-i-check-my-node_modules-folder-into-git
 node_modules
 logs
-.vscode
 config
+.vscode
 
 # Book build output
 _book
