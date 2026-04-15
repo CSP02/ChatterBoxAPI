@@ -33,7 +33,15 @@ database.once("connected", () => {
  */
 const apiServer = express();
 apiServer.use(express.json());
-apiServer.use(cors());
+
+const corsOptions = {
+  origin: 'https://chatter-box-indol.vercel.app',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true 
+};
+
+apiServer.use(cors(corsOptions));
 
 apiServer.use("/api", router)
 apiServer.use(morgan('combined', {
