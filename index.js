@@ -44,11 +44,11 @@ const corsOptions = {
 apiServer.use(cors(corsOptions));
 
 apiServer.use("/api", router)
-apiServer.use(morgan('combined', {
-    stream: {
-        write: (message) => logger.info(message.trim())
-    }
-}));
+// apiServer.use(morgan('combined', {
+//     stream: {
+//         write: (message) => logger.info(message.trim())
+//     }
+// }));
 
 apiServer.listen("3001", () => {
     logger.info("Listening to 3001")
