@@ -5,7 +5,7 @@ const express = require("express");
 const router = express.Router();
 const rateLimit = require('express-rate-limit');
 const sanitizer = require('express-sanitizer');
-const logger = require('../config/logger');
+// const logger = require('../config/logger');
 
 require("./routes/channel")(router);
 require("./routes/login")(router);
